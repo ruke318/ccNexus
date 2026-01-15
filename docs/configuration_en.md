@@ -4,7 +4,8 @@
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Proxy Port | Local proxy listening port | `3000` |
+| Claude Port | Claude Code listening port | `3000` |
+| Codex Port | Codex CLI listening port | `3001` |
 | Log Level | 0=Debug, 1=Info, 2=Warn, 3=Error | `1` |
 | Language | Chinese / English | `zh-CN` |
 | Theme | 12 themes available | `light` |
@@ -22,6 +23,12 @@
 | `openai2` | OpenAI Response API |
 | `gemini` | Google Gemini API |
 
+### Client Type
+
+| Field | Description |
+|------|------|
+| `clientType` | Endpoint owner: `claude` / `codex` (defaults inferred from transformer) |
+
 ### Configuration Examples
 
 **Claude Endpoint:**
@@ -31,7 +38,9 @@
   "apiUrl": "https://api.anthropic.com",
   "apiKey": "sk-ant-api03-xxx",
   "enabled": true,
-  "transformer": "claude"
+  "transformer": "claude",
+  "clientType": "claude",
+  "proxyUrl": "http://127.0.0.1:7890"
 }
 ```
 
@@ -43,6 +52,7 @@
   "apiKey": "sk-xxx",
   "enabled": true,
   "transformer": "openai",
+  "clientType": "codex",
   "model": "gpt-4-turbo"
 }
 ```

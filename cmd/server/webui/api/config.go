@@ -23,16 +23,18 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 // getConfig returns the full configuration
 func (h *Handler) getConfig(w http.ResponseWriter, r *http.Request) {
 	WriteSuccess(w, map[string]interface{}{
-		"port":     h.config.GetPort(),
-		"logLevel": h.config.GetLogLevel(),
+		"claudePort": h.config.GetClaudePort(),
+		"codexPort":  h.config.GetCodexPort(),
+		"logLevel":   h.config.GetLogLevel(),
 	})
 }
 
 // updateConfig updates the full configuration
 func (h *Handler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Port     int `json:"port"`
-		LogLevel int `json:"logLevel"`
+		ClaudePort int `json:"claudePort"`
+		CodexPort  int `json:"codexPort"`
+		LogLevel   int `json:"logLevel"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -40,9 +42,11 @@ func (h *Handler) updateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update port if provided
-	if req.Port > 0 {
-		h.config.UpdatePort(req.Port)
+	if req.ClaudePort > 0 {
+		h.config.UpdateClaudePort(req.ClaudePort)
+	}
+	if req.CodexPort > 0 {
+		h.config.UpdateCodexPort(req.CodexPort)
 	}
 
 	// Update log level if provided
@@ -68,11 +72,13 @@ func (h *Handler) handleConfigPort(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		WriteSuccess(w, map[string]interface{}{
-			"port": h.config.GetPort(),
+			"claudePort": h.config.GetClaudePort(),
+			"codexPort":  h.config.GetCodexPort(),
 		})
 	case http.MethodPut:
 		var req struct {
-			Port int `json:"port"`
+			ClaudePort int `json:"claudePort"`
+			CodexPort  int `json:"codexPort"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -80,12 +86,20 @@ func (h *Handler) handleConfigPort(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if req.Port <= 0 || req.Port > 65535 {
-			WriteError(w, http.StatusBadRequest, "Invalid port number")
-			return
+		if req.ClaudePort != 0 {
+			if req.ClaudePort < 1 || req.ClaudePort > 65535 {
+				WriteError(w, http.StatusBadRequest, "Invalid Claude port number")
+				return
+			}
+			h.config.UpdateClaudePort(req.ClaudePort)
 		}
-
-		h.config.UpdatePort(req.Port)
+		if req.CodexPort != 0 {
+			if req.CodexPort < 1 || req.CodexPort > 65535 {
+				WriteError(w, http.StatusBadRequest, "Invalid Codex port number")
+				return
+			}
+			h.config.UpdateCodexPort(req.CodexPort)
+		}
 
 		// Save to storage
 		adapter := storage.NewConfigStorageAdapter(h.storage)
@@ -96,8 +110,9 @@ func (h *Handler) handleConfigPort(w http.ResponseWriter, r *http.Request) {
 		}
 
 		WriteSuccess(w, map[string]interface{}{
-			"port":    req.Port,
-			"message": "Port updated successfully (restart required)",
+			"claudePort": h.config.GetClaudePort(),
+			"codexPort":  h.config.GetCodexPort(),
+			"message":    "Port updated successfully (restart required)",
 		})
 	default:
 		WriteError(w, http.StatusMethodNotAllowed, "Method not allowed")

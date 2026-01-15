@@ -11,6 +11,8 @@ type Endpoint struct {
 	Transformer string    `json:"transformer"`
 	Model       string    `json:"model"`
 	Remark      string    `json:"remark"`
+	ClientType  string    `json:"clientType"`
+	ProxyURL    string    `json:"proxyUrl"`
 	SortOrder   int       `json:"sortOrder"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`

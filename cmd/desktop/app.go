@@ -368,26 +368,30 @@ func (a *App) GetStatsTrendByPeriod(period string) string {
 
 // ========== Endpoint Bindings ==========
 
-func (a *App) AddEndpoint(name, apiUrl, apiKey, transformer, model, remark string) error {
-	return a.endpoint.AddEndpoint(name, apiUrl, apiKey, transformer, model, remark)
+func (a *App) AddEndpoint(name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType string) error {
+	return a.endpoint.AddEndpoint(name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType)
 }
 func (a *App) RemoveEndpoint(index int) error { return a.endpoint.RemoveEndpoint(index) }
-func (a *App) UpdateEndpoint(index int, name, apiUrl, apiKey, transformer, model, remark string) error {
-	return a.endpoint.UpdateEndpoint(index, name, apiUrl, apiKey, transformer, model, remark)
+func (a *App) UpdateEndpoint(index int, name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType string) error {
+	return a.endpoint.UpdateEndpoint(index, name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType)
 }
 func (a *App) ToggleEndpoint(index int, enabled bool) error {
 	return a.endpoint.ToggleEndpoint(index, enabled)
 }
-func (a *App) ReorderEndpoints(names []string) error { return a.endpoint.ReorderEndpoints(names) }
-func (a *App) GetCurrentEndpoint() string            { return a.endpoint.GetCurrentEndpoint() }
-func (a *App) SwitchToEndpoint(endpointName string) error {
-	return a.endpoint.SwitchToEndpoint(endpointName)
+func (a *App) ReorderEndpoints(names []string, clientType string) error {
+	return a.endpoint.ReorderEndpoints(names, clientType)
+}
+func (a *App) GetCurrentEndpoint(clientType string) string {
+	return a.endpoint.GetCurrentEndpoint(clientType)
+}
+func (a *App) SwitchToEndpoint(endpointName, clientType string) error {
+	return a.endpoint.SwitchToEndpoint(endpointName, clientType)
 }
 func (a *App) TestEndpoint(index int) string      { return a.endpoint.TestEndpoint(index) }
 func (a *App) TestEndpointLight(index int) string { return a.endpoint.TestEndpointLight(index) }
 func (a *App) TestAllEndpointsZeroCost() string   { return a.endpoint.TestAllEndpointsZeroCost() }
-func (a *App) FetchModels(apiUrl, apiKey, transformer string) string {
-	return a.endpoint.FetchModels(apiUrl, apiKey, transformer)
+func (a *App) FetchModels(apiUrl, apiKey, transformer, proxyURL string) string {
+	return a.endpoint.FetchModels(apiUrl, apiKey, transformer, proxyURL)
 }
 
 // ========== Settings Bindings ==========
@@ -396,7 +400,9 @@ func (a *App) GetConfig() string { return a.settings.GetConfig() }
 func (a *App) UpdateConfig(configJSON string) error {
 	return a.settings.UpdateConfig(configJSON, a.proxy)
 }
-func (a *App) UpdatePort(port int) error            { return a.settings.UpdatePort(port) }
+func (a *App) UpdatePorts(claudePort, codexPort int) error {
+	return a.settings.UpdatePorts(claudePort, codexPort)
+}
 func (a *App) GetSystemLanguage() string            { return a.settings.GetSystemLanguage() }
 func (a *App) GetLanguage() string                  { return a.settings.GetLanguage() }
 func (a *App) SetLanguage(language string) error    { return a.settings.SetLanguage(language) }

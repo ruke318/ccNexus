@@ -57,6 +57,7 @@ Click "Add Endpoint", fill in API URL, key, and select transformer (claude/opena
 }
 
 ```
+Default Claude port is `3000`. If you change it, point `ANTHROPIC_BASE_URL` to the Claude port.
 
 #### Codex CLI
 Just configure `~/.codex/config.toml`:
@@ -67,11 +68,12 @@ preferred_auth_method = "apikey"
 
 [model_providers.ccNexus]
 name = "ccNexus"
-base_url = "http://localhost:3000/v1"
+base_url = "http://localhost:3001/v1"
 wire_api = "responses"  # or "chat"
 
 # Other settings
 ```
+Default Codex port is `3001`. If you change it, point `base_url` to the Codex port.
 
 `~/.codex/auth.json` can be ignored.
 

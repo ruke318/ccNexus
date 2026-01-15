@@ -29,6 +29,8 @@ func (a *ConfigStorageAdapter) GetEndpoints() ([]config.StorageEndpoint, error) 
 			Transformer: ep.Transformer,
 			Model:       ep.Model,
 			Remark:      ep.Remark,
+			ClientType:  ep.ClientType,
+			ProxyURL:    ep.ProxyURL,
 			SortOrder:   ep.SortOrder,
 		}
 	}
@@ -45,6 +47,8 @@ func (a *ConfigStorageAdapter) SaveEndpoint(ep *config.StorageEndpoint) error {
 		Transformer: ep.Transformer,
 		Model:       ep.Model,
 		Remark:      ep.Remark,
+		ClientType:  ep.ClientType,
+		ProxyURL:    ep.ProxyURL,
 		SortOrder:   ep.SortOrder,
 	}
 	return a.storage.SaveEndpoint(endpoint)
@@ -60,6 +64,8 @@ func (a *ConfigStorageAdapter) UpdateEndpoint(ep *config.StorageEndpoint) error 
 		Transformer: ep.Transformer,
 		Model:       ep.Model,
 		Remark:      ep.Remark,
+		ClientType:  ep.ClientType,
+		ProxyURL:    ep.ProxyURL,
 		SortOrder:   ep.SortOrder,
 	}
 	return a.storage.UpdateEndpoint(endpoint)

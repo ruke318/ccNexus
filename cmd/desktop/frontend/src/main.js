@@ -5,7 +5,7 @@ import { setLanguage } from './i18n/index.js'
 import { initUI, changeLanguage } from './modules/ui.js'
 import { loadConfig } from './modules/config.js'
 import { loadStats, switchStatsPeriod, loadStatsByPeriod, getCurrentPeriod } from './modules/stats.js'
-import { renderEndpoints, toggleEndpointPanel, initEndpointSuccessListener, checkAllEndpointsOnStartup, switchEndpointViewMode, initEndpointViewMode, isDropdownOpen } from './modules/endpoints.js'
+import { renderEndpoints, toggleEndpointPanel, initEndpointSuccessListener, checkAllEndpointsOnStartup, switchEndpointViewMode, initEndpointViewMode, switchEndpointTab, initEndpointTab, isDropdownOpen } from './modules/endpoints.js'
 import { loadLogs, toggleLogPanel, changeLogLevel, copyLogs, clearLogs } from './modules/logs.js'
 import { showDataSyncDialog } from './modules/webdav.js'
 import { initTips } from './modules/tips.js'
@@ -65,6 +65,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // Initialize endpoint view mode
     initEndpointViewMode();
+    initEndpointTab();
 
     // Initialize terminal module
     initTerminal();
@@ -115,9 +116,13 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (isDropdownOpen()) {
             return;
         }
-        const config = await window.go.main.App.GetConfig();
-        if (config) {
-            renderEndpoints(JSON.parse(config).endpoints);
+        const configStr = await window.go.main.App.GetConfig();
+        if (configStr) {
+            const config = JSON.parse(configStr);
+            const claudeEndpoints = config.endpoints.filter(ep => (ep.clientType || 'claude') === 'claude');
+            const codexEndpoints = config.endpoints.filter(ep => (ep.clientType || 'claude') === 'codex');
+            renderEndpoints(claudeEndpoints, 'claude', 'endpointListClaude');
+            renderEndpoints(codexEndpoints, 'codex', 'endpointListCodex');
         }
     }, 3000);
 
@@ -160,7 +165,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 async function loadConfigAndRender() {
     const config = await loadConfig();
     if (config) {
-        renderEndpoints(config.endpoints);
+        const claudeEndpoints = config.endpoints.filter(ep => (ep.clientType || 'claude') === 'claude');
+        const codexEndpoints = config.endpoints.filter(ep => (ep.clientType || 'claude') === 'codex');
+        renderEndpoints(claudeEndpoints, 'claude', 'endpointListClaude');
+        renderEndpoints(codexEndpoints, 'codex', 'endpointListCodex');
     }
 }
 
@@ -201,6 +209,7 @@ window.showDataSyncDialog = showDataSyncDialog;
 window.switchStatsPeriod = switchStatsPeriod;
 window.toggleEndpointPanel = toggleEndpointPanel;
 window.switchEndpointViewMode = switchEndpointViewMode;
+window.switchEndpointTab = switchEndpointTab;
 window.showSettingsModal = showSettingsModal;
 window.closeSettingsModal = closeSettingsModal;
 window.saveSettings = saveSettings;

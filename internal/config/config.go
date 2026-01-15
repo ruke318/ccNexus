@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"sync"
 )
@@ -16,6 +17,8 @@ type Endpoint struct {
 	Transformer string `json:"transformer,omitempty"` // Transformer type: claude, openai, gemini, deepseek
 	Model       string `json:"model,omitempty"`       // Target model name for non-Claude APIs
 	Remark      string `json:"remark,omitempty"`      // Optional remark for the endpoint
+	ClientType  string `json:"clientType,omitempty"`  // Endpoint owner: claude or codex
+	ProxyURL    string `json:"proxyUrl,omitempty"`    // Optional per-endpoint proxy URL
 }
 
 // WebDAVConfig represents WebDAV synchronization configuration
@@ -73,31 +76,33 @@ type ProxyConfig struct {
 
 // Config represents the application configuration
 type Config struct {
-	Port                int             `json:"port"`
-	Endpoints           []Endpoint      `json:"endpoints"`
-	LogLevel            int             `json:"logLevel"`                      // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
-	Language            string          `json:"language"`                      // UI language: en, zh-CN
-	Theme               string          `json:"theme"`                         // UI theme: light, dark
-	ThemeAuto           bool            `json:"themeAuto"`                     // Auto switch theme based on time
-	AutoLightTheme      string          `json:"autoLightTheme,omitempty"`      // Theme to use in daytime when auto mode is on
-	AutoDarkTheme       string          `json:"autoDarkTheme,omitempty"`       // Theme to use in nighttime when auto mode is on
-	WindowWidth         int             `json:"windowWidth"`                   // Window width in pixels
-	WindowHeight        int             `json:"windowHeight"`                  // Window height in pixels
+	ClaudePort                int             `json:"claudePort,omitempty"`
+	CodexPort                 int             `json:"codexPort,omitempty"`
+	Endpoints                 []Endpoint      `json:"endpoints"`
+	LogLevel                  int             `json:"logLevel"`                      // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
+	Language                  string          `json:"language"`                      // UI language: en, zh-CN
+	Theme                     string          `json:"theme"`                         // UI theme: light, dark
+	ThemeAuto                 bool            `json:"themeAuto"`                     // Auto switch theme based on time
+	AutoLightTheme            string          `json:"autoLightTheme,omitempty"`      // Theme to use in daytime when auto mode is on
+	AutoDarkTheme             string          `json:"autoDarkTheme,omitempty"`       // Theme to use in nighttime when auto mode is on
+	WindowWidth               int             `json:"windowWidth"`                   // Window width in pixels
+	WindowHeight              int             `json:"windowHeight"`                  // Window height in pixels
 	CloseWindowBehavior       string          `json:"closeWindowBehavior,omitempty"` // "quit", "minimize", "ask"
 	ClaudeNotificationEnabled bool            `json:"claudeNotificationEnabled"`     // Enable Claude Code task completion notification
 	ClaudeNotificationType    string          `json:"claudeNotificationType"`        // Notification type: toast, dialog, disabled
 	WebDAV                    *WebDAVConfig   `json:"webdav,omitempty"`              // WebDAV synchronization config
-	Backup              *BackupConfig   `json:"backup,omitempty"`              // Backup/sync configuration
-	Update              *UpdateConfig   `json:"update,omitempty"`              // Update configuration
-	Terminal            *TerminalConfig `json:"terminal,omitempty"`            // Terminal launcher config
-	Proxy               *ProxyConfig    `json:"proxy,omitempty"`               // HTTP proxy config
-	mu                  sync.RWMutex
+	Backup                    *BackupConfig   `json:"backup,omitempty"`              // Backup/sync configuration
+	Update                    *UpdateConfig   `json:"update,omitempty"`              // Update configuration
+	Terminal                  *TerminalConfig `json:"terminal,omitempty"`            // Terminal launcher config
+	Proxy                     *ProxyConfig    `json:"proxy,omitempty"`               // HTTP proxy config
+	mu                        sync.RWMutex
 }
 
 // DefaultConfig returns a default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		Port:         3000,
+		ClaudePort:   3000,
+		CodexPort:    3001,
 		LogLevel:     1,       // Default to INFO level
 		Language:     "zh-CN", // Default to Chinese
 		WindowWidth:  1024,    // Default window width
@@ -123,8 +128,11 @@ func (c *Config) Validate() error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if c.Port < 1 || c.Port > 65535 {
-		return fmt.Errorf("invalid port: %d", c.Port)
+	if c.ClaudePort < 1 || c.ClaudePort > 65535 {
+		return fmt.Errorf("invalid claudePort: %d", c.ClaudePort)
+	}
+	if c.CodexPort < 1 || c.CodexPort > 65535 {
+		return fmt.Errorf("invalid codexPort: %d", c.CodexPort)
 	}
 
 	if len(c.Endpoints) == 0 {
@@ -142,6 +150,12 @@ func (c *Config) Validate() error {
 		// Default to claude transformer if not specified
 		if ep.Transformer == "" {
 			c.Endpoints[i].Transformer = "claude"
+		}
+		if ep.ClientType == "" {
+			c.Endpoints[i].ClientType = InferClientType(ep.Transformer)
+		}
+		if ep.ClientType != "claude" && ep.ClientType != "codex" {
+			return fmt.Errorf("endpoint %d (%s): invalid clientType '%s'", i+1, ep.Name, ep.ClientType)
 		}
 
 		// Non-Claude transformers require model field
@@ -163,11 +177,39 @@ func (c *Config) GetEndpoints() []Endpoint {
 	return endpoints
 }
 
-// GetPort returns the configured port (thread-safe)
-func (c *Config) GetPort() int {
+// GetClaudePort returns the configured Claude port (thread-safe).
+func (c *Config) GetClaudePort() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.Port
+	return c.ClaudePort
+}
+
+// GetCodexPort returns the configured Codex port (thread-safe).
+func (c *Config) GetCodexPort() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.CodexPort
+}
+
+// GetListenPorts returns unique ports used by listeners (thread-safe).
+func (c *Config) GetListenPorts() []int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	ports := make(map[int]struct{}, 2)
+	if c.ClaudePort > 0 {
+		ports[c.ClaudePort] = struct{}{}
+	}
+	if c.CodexPort > 0 {
+		ports[c.CodexPort] = struct{}{}
+	}
+
+	result := make([]int, 0, len(ports))
+	for port := range ports {
+		result = append(result, port)
+	}
+	sort.Ints(result)
+	return result
 }
 
 // GetLogLevel returns the configured log level (thread-safe)
@@ -184,11 +226,18 @@ func (c *Config) UpdateEndpoints(endpoints []Endpoint) {
 	c.Endpoints = endpoints
 }
 
-// UpdatePort updates the port (thread-safe)
-func (c *Config) UpdatePort(port int) {
+// UpdateClaudePort updates the Claude port (thread-safe)
+func (c *Config) UpdateClaudePort(port int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.Port = port
+	c.ClaudePort = port
+}
+
+// UpdateCodexPort updates the Codex port (thread-safe)
+func (c *Config) UpdateCodexPort(port int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.CodexPort = port
 }
 
 // UpdateLogLevel updates the log level (thread-safe)
@@ -417,7 +466,19 @@ type StorageEndpoint struct {
 	Transformer string
 	Model       string
 	Remark      string
+	ClientType  string
+	ProxyURL    string
 	SortOrder   int
+}
+
+// InferClientType returns default client type based on transformer.
+func InferClientType(transformer string) string {
+	switch transformer {
+	case "openai", "openai2":
+		return "codex"
+	default:
+		return "claude"
+	}
 }
 
 // LoadFromStorage loads configuration from SQLite storage
@@ -441,21 +502,42 @@ func LoadFromStorage(storage StorageAdapter) (*Config, error) {
 			Transformer: ep.Transformer,
 			Model:       ep.Model,
 			Remark:      ep.Remark,
+			ClientType:  ep.ClientType,
+			ProxyURL:    ep.ProxyURL,
 		}
 		if endpoint.Transformer == "" {
 			endpoint.Transformer = "claude"
+		}
+		if endpoint.ClientType == "" {
+			endpoint.ClientType = InferClientType(endpoint.Transformer)
 		}
 		config.Endpoints = append(config.Endpoints, endpoint)
 	}
 
 	// Load app config
-	if portStr, err := storage.GetConfig("port"); err == nil && portStr != "" {
-		if port, err := strconv.Atoi(portStr); err == nil {
-			config.Port = port
+	if claudePortStr, err := storage.GetConfig("claude_port"); err == nil && claudePortStr != "" {
+		if port, err := strconv.Atoi(claudePortStr); err == nil {
+			config.ClaudePort = port
 		}
 	}
-	if config.Port == 0 {
-		config.Port = 3000
+	if codexPortStr, err := storage.GetConfig("codex_port"); err == nil && codexPortStr != "" {
+		if port, err := strconv.Atoi(codexPortStr); err == nil {
+			config.CodexPort = port
+		}
+	}
+	if config.ClaudePort == 0 && config.CodexPort == 0 {
+		if portStr, err := storage.GetConfig("port"); err == nil && portStr != "" {
+			if port, err := strconv.Atoi(portStr); err == nil && port > 0 {
+				config.ClaudePort = port
+				config.CodexPort = port
+			}
+		}
+	}
+	if config.ClaudePort == 0 {
+		config.ClaudePort = 3000
+	}
+	if config.CodexPort == 0 {
+		config.CodexPort = 3001
 	}
 
 	if logLevelStr, err := storage.GetConfig("logLevel"); err == nil && logLevelStr != "" {
@@ -649,6 +731,10 @@ func (c *Config) SaveToStorage(storage StorageAdapter) error {
 
 	// Save/update endpoints
 	for i, ep := range c.Endpoints {
+		clientType := ep.ClientType
+		if clientType == "" {
+			clientType = InferClientType(ep.Transformer)
+		}
 		endpoint := &StorageEndpoint{
 			Name:        ep.Name,
 			APIUrl:      ep.APIUrl,
@@ -657,6 +743,8 @@ func (c *Config) SaveToStorage(storage StorageAdapter) error {
 			Transformer: ep.Transformer,
 			Model:       ep.Model,
 			Remark:      ep.Remark,
+			ClientType:  clientType,
+			ProxyURL:    ep.ProxyURL,
 			SortOrder:   i, // Use array index as sort order
 		}
 
@@ -680,7 +768,16 @@ func (c *Config) SaveToStorage(storage StorageAdapter) error {
 	}
 
 	// Save app config
-	storage.SetConfig("port", strconv.Itoa(c.Port))
+	if c.ClaudePort > 0 {
+		storage.SetConfig("claude_port", strconv.Itoa(c.ClaudePort))
+	} else {
+		storage.SetConfig("claude_port", "")
+	}
+	if c.CodexPort > 0 {
+		storage.SetConfig("codex_port", strconv.Itoa(c.CodexPort))
+	} else {
+		storage.SetConfig("codex_port", "")
+	}
 	storage.SetConfig("logLevel", strconv.Itoa(c.LogLevel))
 	storage.SetConfig("language", c.Language)
 	storage.SetConfig("theme", c.Theme)

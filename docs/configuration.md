@@ -4,7 +4,8 @@
 
 | 设置项 | 说明 | 默认值 |
 |--------|------|--------|
-| 代理端口 | 本地代理监听端口 | `3000` |
+| Claude 端口 | Claude Code 监听端口 | `3000` |
+| Codex 端口 | Codex CLI 监听端口 | `3001` |
 | 日志级别 | 0= 调试，1= 信息，2= 警告，3= 错误 | `1` |
 | 界面语言 | 中文 / English | `zh-CN` |
 | 主题 | 12 种主题可选 | `light` |
@@ -22,6 +23,12 @@
 | `openai2` | OpenAI Response API |
 | `gemini` | Google Gemini API |
 
+### 端点归属
+
+| 字段 | 说明 |
+|------|------|
+| `clientType` | 端点归属：`claude` / `codex`（默认根据 transformer 自动推断） |
+
 ### 配置示例
 
 **Claude 端点：**
@@ -31,7 +38,9 @@
   "apiUrl": "https://api.anthropic.com",
   "apiKey": "sk-ant-api03-xxx",
   "enabled": true,
-  "transformer": "claude"
+  "transformer": "claude",
+  "clientType": "claude",
+  "proxyUrl": "http://127.0.0.1:7890"
 }
 ```
 
@@ -43,6 +52,7 @@
   "apiKey": "sk-xxx",
   "enabled": true,
   "transformer": "openai",
+  "clientType": "codex",
   "model": "gpt-4-turbo"
 }
 ```

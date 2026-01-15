@@ -74,11 +74,15 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, resp *http.Respon
 	var outputText strings.Builder
 	eventCount := 0
 	streamDone := false
+	clientType := endpoint.ClientType
+	if clientType == "" {
+		clientType = config.InferClientType(endpoint.Transformer)
+	}
 
 	for scanner.Scan() && !streamDone {
 		line := scanner.Text()
 
-		if !p.isCurrentEndpoint(endpoint.Name) {
+		if !p.isCurrentEndpoint(endpoint.Name, clientType) {
 			logger.Warn("[%s] Endpoint switched during streaming, terminating stream gracefully", endpoint.Name)
 			streamDone = true
 			break

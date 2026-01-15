@@ -17,8 +17,11 @@ export function initUI() {
                 </div>
                 <div style="display: flex; gap: 15px; align-items: center;">
                     <div class="port-display" onclick="window.showEditPortModal()" title="${t('header.port')}">
-                        <span style="color: #666; font-size: 15px; position: relative; top: -0.3px;">${t('header.port')}: </span>
-                        <span class="port-number" id="proxyPort">3000</span>
+                        <span style="color: #666; font-size: 14px;">${t('header.claudePort')}</span>
+                        <span class="port-number" id="claudePort">3000</span>
+                        <span style="color: #999; font-size: 14px; padding: 0 6px;">|</span>
+                        <span style="color: #666; font-size: 14px;">${t('header.codexPort')}</span>
+                        <span class="port-number" id="codexPort">3001</span>
                     </div>
                     <div style="display: flex; gap: 10px;">
                         <button class="header-link" onclick="window.openGitHub()" title="${t('header.githubRepo')}">
@@ -232,7 +235,7 @@ export function initUI() {
                             </button>
                         </div>
                     </div>
-                    <div style="display: flex; gap: 10px;">
+                    <div class="endpoint-header-actions">
                         ${isShowBtn ? `
                         <button class="btn btn-secondary" onclick="window.showTerminalModal()">
                             🖥️ ${t('terminal.title')}
@@ -240,14 +243,28 @@ export function initUI() {
                         <button class="btn btn-secondary" onclick="window.showDataSyncDialog()">
                             🔄 ${t('webdav.dataSync')}
                         </button>
-                        <button class="btn btn-primary" onclick="window.showAddEndpointModal()">
-                            ➕ ${t('header.addEndpoint')}
+                        <button class="btn btn-primary endpoint-add-btn" data-tab="claude" onclick="window.showAddEndpointModal('claude')">
+                            ➕ ${t('endpoints.addClaude')}
+                        </button>
+                        <button class="btn btn-primary endpoint-add-btn" data-tab="codex" onclick="window.showAddEndpointModal('codex')">
+                            ➕ ${t('endpoints.addCodex')}
                         </button>
                     </div>
                 </div>
                 <div id="endpointPanel" class="endpoint-panel">
-                    <div id="endpointList" class="endpoint-list">
-                        <div class="loading">${t('endpoints.title')}...</div>
+                    <div class="endpoint-tabs">
+                        <button class="endpoint-tab-btn active" data-tab="claude" onclick="window.switchEndpointTab('claude')">${t('endpoints.claudePanel')}</button>
+                        <button class="endpoint-tab-btn" data-tab="codex" onclick="window.switchEndpointTab('codex')">${t('endpoints.codexPanel')}</button>
+                    </div>
+                    <div class="endpoint-tab-content active" data-tab="claude">
+                        <div id="endpointListClaude" class="endpoint-list">
+                            <div class="loading">${t('endpoints.loadingClaude')}</div>
+                        </div>
+                    </div>
+                    <div class="endpoint-tab-content" data-tab="codex">
+                        <div id="endpointListCodex" class="endpoint-list">
+                            <div class="loading">${t('endpoints.loadingCodex')}</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -327,6 +344,13 @@ export function initUI() {
                                 </svg>
                             </button>
                         </div>
+                    </div>
+                    <div class="form-group">
+                        <label>${t('modal.proxy')}</label>
+                        <input type="text" id="endpointProxyUrl" placeholder="${t('modal.proxyPlaceholder')}">
+                        <p style="color: #666; font-size: 12px; margin-top: 5px;">
+                            ${t('modal.proxyHelp')}
+                        </p>
                     </div>
                     <div class="form-group">
                         <label><span class="required">*</span>${t('modal.transformer')}</label>
@@ -439,8 +463,12 @@ export function initUI() {
                 </div>
                 <div class="modal-body">
                     <div class="form-group">
-                        <label><span class="required">*</span>${t('modal.portLabel')}</label>
-                        <input type="number" id="portInput" min="1" max="65535" placeholder="3000">
+                        <label><span class="required">*</span>${t('modal.claudePortLabel')}</label>
+                        <input type="number" id="claudePortInput" min="1" max="65535" placeholder="3000">
+                    </div>
+                    <div class="form-group">
+                        <label><span class="required">*</span>${t('modal.codexPortLabel')}</label>
+                        <input type="number" id="codexPortInput" min="1" max="65535" placeholder="3001">
                     </div>
                     <p style="color: #666; font-size: 14px; margin-top: 10px;">
                         ⚠️ ${t('modal.portNote')}

@@ -16,7 +16,7 @@ import (
 // 是设备/平台特定的，不应在不同设备间同步。
 var safeConfigKeys = []string{
 	// 应用设置
-	"port", "logLevel", "language",
+	"claude_port", "codex_port", "logLevel", "language",
 	// 主题设置
 	"theme", "themeAuto", "autoLightTheme", "autoDarkTheme",
 	// 窗口关闭行为
@@ -37,6 +37,10 @@ type SQLiteStorage struct {
 	db     *sql.DB
 	dbPath string
 	mu     sync.RWMutex
+}
+
+type sqlQueryer interface {
+	Query(query string, args ...interface{}) (*sql.Rows, error)
 }
 
 func NewSQLiteStorage(dbPath string) (*SQLiteStorage, error) {
@@ -75,6 +79,8 @@ func (s *SQLiteStorage) initSchema() error {
 		transformer TEXT DEFAULT 'claude',
 		model TEXT,
 		remark TEXT,
+		client_type TEXT,
+		proxy_url TEXT,
 		sort_order INTEGER DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -112,6 +118,12 @@ func (s *SQLiteStorage) initSchema() error {
 	if err := s.migrateSortOrder(); err != nil {
 		return err
 	}
+	if err := s.migrateClientType(); err != nil {
+		return err
+	}
+	if err := s.migrateProxyURL(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -141,11 +153,41 @@ func (s *SQLiteStorage) migrateSortOrder() error {
 	return nil
 }
 
+// migrateProxyURL adds the proxy_url column to existing endpoints table if it doesn't exist
+func (s *SQLiteStorage) migrateProxyURL() error {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('endpoints') WHERE name='proxy_url'`).Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE endpoints ADD COLUMN proxy_url TEXT`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrateClientType adds the client_type column to existing endpoints table if it doesn't exist
+func (s *SQLiteStorage) migrateClientType() error {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('endpoints') WHERE name='client_type'`).Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE endpoints ADD COLUMN client_type TEXT`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *SQLiteStorage) GetEndpoints() ([]Endpoint, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query(`SELECT id, name, api_url, api_key, enabled, transformer, model, remark, sort_order, created_at, updated_at FROM endpoints ORDER BY sort_order ASC`)
+	rows, err := s.db.Query(`SELECT id, name, api_url, api_key, enabled, transformer, model, remark, client_type, proxy_url, sort_order, created_at, updated_at FROM endpoints ORDER BY sort_order ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -154,8 +196,24 @@ func (s *SQLiteStorage) GetEndpoints() ([]Endpoint, error) {
 	var endpoints []Endpoint
 	for rows.Next() {
 		var ep Endpoint
-		if err := rows.Scan(&ep.ID, &ep.Name, &ep.APIUrl, &ep.APIKey, &ep.Enabled, &ep.Transformer, &ep.Model, &ep.Remark, &ep.SortOrder, &ep.CreatedAt, &ep.UpdatedAt); err != nil {
+		var clientType sql.NullString
+		var proxyURL sql.NullString
+		if err := rows.Scan(&ep.ID, &ep.Name, &ep.APIUrl, &ep.APIKey, &ep.Enabled, &ep.Transformer, &ep.Model, &ep.Remark, &clientType, &proxyURL, &ep.SortOrder, &ep.CreatedAt, &ep.UpdatedAt); err != nil {
 			return nil, err
+		}
+		if clientType.Valid {
+			ep.ClientType = clientType.String
+		}
+		if proxyURL.Valid {
+			ep.ProxyURL = proxyURL.String
+		}
+		if ep.ClientType == "" {
+			switch ep.Transformer {
+			case "openai", "openai2":
+				ep.ClientType = "codex"
+			default:
+				ep.ClientType = "claude"
+			}
 		}
 		endpoints = append(endpoints, ep)
 	}
@@ -167,8 +225,8 @@ func (s *SQLiteStorage) SaveEndpoint(ep *Endpoint) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	result, err := s.db.Exec(`INSERT INTO endpoints (name, api_url, api_key, enabled, transformer, model, remark, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		ep.Name, ep.APIUrl, ep.APIKey, ep.Enabled, ep.Transformer, ep.Model, ep.Remark, ep.SortOrder)
+	result, err := s.db.Exec(`INSERT INTO endpoints (name, api_url, api_key, enabled, transformer, model, remark, client_type, proxy_url, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ep.Name, ep.APIUrl, ep.APIKey, ep.Enabled, ep.Transformer, ep.Model, ep.Remark, ep.ClientType, ep.ProxyURL, ep.SortOrder)
 	if err != nil {
 		return err
 	}
@@ -185,8 +243,8 @@ func (s *SQLiteStorage) UpdateEndpoint(ep *Endpoint) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.db.Exec(`UPDATE endpoints SET api_url=?, api_key=?, enabled=?, transformer=?, model=?, remark=?, sort_order=?, updated_at=CURRENT_TIMESTAMP WHERE name=?`,
-		ep.APIUrl, ep.APIKey, ep.Enabled, ep.Transformer, ep.Model, ep.Remark, ep.SortOrder, ep.Name)
+	_, err := s.db.Exec(`UPDATE endpoints SET api_url=?, api_key=?, enabled=?, transformer=?, model=?, remark=?, client_type=?, proxy_url=?, sort_order=?, updated_at=CURRENT_TIMESTAMP WHERE name=?`,
+		ep.APIUrl, ep.APIKey, ep.Enabled, ep.Transformer, ep.Model, ep.Remark, ep.ClientType, ep.ProxyURL, ep.SortOrder, ep.Name)
 	return err
 }
 
@@ -562,9 +620,60 @@ func (s *SQLiteStorage) DetectEndpointConflicts(remoteDBPath string) ([]MergeCon
 	return conflicts, nil
 }
 
+func columnExists(db sqlQueryer, dbName, table, column string) (bool, error) {
+	query := fmt.Sprintf("PRAGMA %s.table_info(%s)", dbName, table)
+	rows, err := db.Query(query)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name string
+		var colType string
+		var notNull int
+		var defaultValue sql.NullString
+		var primaryKey int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
 // getEndpointsFromDB gets endpoints from a specific database (main or attached)
 func (s *SQLiteStorage) getEndpointsFromDB(db *sql.DB, dbName string) ([]Endpoint, error) {
-	query := fmt.Sprintf(`SELECT id, name, api_url, api_key, enabled, transformer, model, remark, COALESCE(sort_order, 0) as sort_order, created_at, updated_at FROM %s.endpoints`, dbName)
+	hasClientType, err := columnExists(db, dbName, "endpoints", "client_type")
+	if err != nil {
+		return nil, err
+	}
+	hasProxyURL, err := columnExists(db, dbName, "endpoints", "proxy_url")
+	if err != nil {
+		return nil, err
+	}
+	hasSortOrder, err := columnExists(db, dbName, "endpoints", "sort_order")
+	if err != nil {
+		return nil, err
+	}
+
+	clientTypeExpr := "'' AS client_type"
+	if hasClientType {
+		clientTypeExpr = "client_type"
+	}
+	proxyURLExpr := "'' AS proxy_url"
+	if hasProxyURL {
+		proxyURLExpr = "proxy_url"
+	}
+	sortOrderExpr := "0 AS sort_order"
+	if hasSortOrder {
+		sortOrderExpr = "COALESCE(sort_order, 0) AS sort_order"
+	}
+
+	query := fmt.Sprintf(`SELECT id, name, api_url, api_key, enabled, transformer, model, remark, %s, %s, %s, created_at, updated_at FROM %s.endpoints`, clientTypeExpr, proxyURLExpr, sortOrderExpr, dbName)
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -574,7 +683,7 @@ func (s *SQLiteStorage) getEndpointsFromDB(db *sql.DB, dbName string) ([]Endpoin
 	var endpoints []Endpoint
 	for rows.Next() {
 		var ep Endpoint
-		if err := rows.Scan(&ep.ID, &ep.Name, &ep.APIUrl, &ep.APIKey, &ep.Enabled, &ep.Transformer, &ep.Model, &ep.Remark, &ep.SortOrder, &ep.CreatedAt, &ep.UpdatedAt); err != nil {
+		if err := rows.Scan(&ep.ID, &ep.Name, &ep.APIUrl, &ep.APIKey, &ep.Enabled, &ep.Transformer, &ep.Model, &ep.Remark, &ep.ClientType, &ep.ProxyURL, &ep.SortOrder, &ep.CreatedAt, &ep.UpdatedAt); err != nil {
 			return nil, err
 		}
 		endpoints = append(endpoints, ep)
@@ -604,6 +713,12 @@ func compareEndpoints(local, remote Endpoint) []string {
 	}
 	if local.Remark != remote.Remark {
 		conflicts = append(conflicts, "remark")
+	}
+	if local.ClientType != remote.ClientType {
+		conflicts = append(conflicts, "clientType")
+	}
+	if local.ProxyURL != remote.ProxyURL {
+		conflicts = append(conflicts, "proxyUrl")
 	}
 
 	return conflicts
@@ -661,24 +776,50 @@ func (s *SQLiteStorage) MergeFromBackup(backupDBPath string, strategy MergeStrat
 
 // mergeEndpoints 根据策略合并端点配置
 func (s *SQLiteStorage) mergeEndpoints(tx *sql.Tx, strategy MergeStrategy) error {
+	hasClientType, err := columnExists(tx, "backup", "endpoints", "client_type")
+	if err != nil {
+		return err
+	}
+	hasProxyURL, err := columnExists(tx, "backup", "endpoints", "proxy_url")
+	if err != nil {
+		return err
+	}
+	hasSortOrder, err := columnExists(tx, "backup", "endpoints", "sort_order")
+	if err != nil {
+		return err
+	}
+
+	clientTypeExpr := "''"
+	if hasClientType {
+		clientTypeExpr = "client_type"
+	}
+	proxyURLExpr := "''"
+	if hasProxyURL {
+		proxyURLExpr = "proxy_url"
+	}
+	sortOrderExpr := "0"
+	if hasSortOrder {
+		sortOrderExpr = "COALESCE(sort_order, 0)"
+	}
+
 	switch strategy {
 	case MergeStrategyKeepLocal:
 		// 只插入新端点（忽略冲突）
-		_, err := tx.Exec(`
+		_, err := tx.Exec(fmt.Sprintf(`
 			INSERT OR IGNORE INTO endpoints
-			(name, api_url, api_key, enabled, transformer, model, remark, sort_order)
-			SELECT name, api_url, api_key, enabled, transformer, model, remark, COALESCE(sort_order, 0)
+			(name, api_url, api_key, enabled, transformer, model, remark, client_type, proxy_url, sort_order)
+			SELECT name, api_url, api_key, enabled, transformer, model, remark, %s, %s, %s
 			FROM backup.endpoints
-		`)
+		`, clientTypeExpr, proxyURLExpr, sortOrderExpr))
 		return err
 	case MergeStrategyOverwriteLocal:
 		// 替换已存在的端点
-		_, err := tx.Exec(`
+		_, err := tx.Exec(fmt.Sprintf(`
 			INSERT OR REPLACE INTO endpoints
-			(name, api_url, api_key, enabled, transformer, model, remark, sort_order)
-			SELECT name, api_url, api_key, enabled, transformer, model, remark, COALESCE(sort_order, 0)
+			(name, api_url, api_key, enabled, transformer, model, remark, client_type, proxy_url, sort_order)
+			SELECT name, api_url, api_key, enabled, transformer, model, remark, %s, %s, %s
 			FROM backup.endpoints
-		`)
+		`, clientTypeExpr, proxyURLExpr, sortOrderExpr))
 		return err
 	default:
 		return fmt.Errorf("unknown merge strategy: %s", strategy)

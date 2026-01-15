@@ -1,9 +1,10 @@
 import { t } from '../i18n/index.js';
 import { escapeHtml } from '../utils/format.js';
-import { addEndpoint, updateEndpoint, removeEndpoint, testEndpoint, testEndpointLight, updatePort } from './config.js';
+import { addEndpoint, updateEndpoint, removeEndpoint, testEndpoint, testEndpointLight, updatePorts } from './config.js';
 import { setTestState, clearTestState, saveEndpointTestStatus } from './endpoints.js';
 
 let currentEditIndex = -1;
+let currentClientType = 'claude';
 
 // Show error toast
 function showError(message) {
@@ -95,8 +96,9 @@ export function togglePasswordVisibility() {
 }
 
 // Endpoint Modal
-export function showAddEndpointModal() {
+export function showAddEndpointModal(clientType = 'claude') {
     currentEditIndex = -1;
+    currentClientType = clientType;
     document.getElementById('modalTitle').textContent = '➕ ' + t('modal.addEndpoint');
     document.getElementById('endpointName').value = '';
     document.getElementById('endpointUrl').value = '';
@@ -106,6 +108,7 @@ export function showAddEndpointModal() {
     document.getElementById('endpointTransformer').value = 'claude';
     document.getElementById('endpointModel').value = '';
     document.getElementById('endpointRemark').value = '';
+    document.getElementById('endpointProxyUrl').value = '';
     handleTransformerChange();
     document.getElementById('endpointModal').classList.add('active');
 }
@@ -117,6 +120,7 @@ export async function editEndpoint(index) {
     const ep = config.endpoints[index];
 
     document.getElementById('modalTitle').textContent = '✏️ ' + t('modal.editEndpoint');
+    currentClientType = ep.clientType || 'claude';
     document.getElementById('endpointName').value = ep.name;
     document.getElementById('endpointUrl').value = ep.apiUrl;
     document.getElementById('endpointKey').value = ep.apiKey;
@@ -125,6 +129,7 @@ export async function editEndpoint(index) {
     document.getElementById('endpointTransformer').value = ep.transformer || 'claude';
     document.getElementById('endpointModel').value = ep.model || '';
     document.getElementById('endpointRemark').value = ep.remark || '';
+    document.getElementById('endpointProxyUrl').value = ep.proxyUrl || '';
 
     handleTransformerChange();
     document.getElementById('endpointModal').classList.add('active');
@@ -137,6 +142,7 @@ export async function saveEndpoint() {
     const transformer = document.getElementById('endpointTransformer').value;
     const model = document.getElementById('endpointModel').value.trim();
     const remark = document.getElementById('endpointRemark').value.trim();
+    const proxyUrl = document.getElementById('endpointProxyUrl').value.trim();
 
     if (!name || !url || !key) {
         showError(t('modal.requiredFields'));
@@ -162,9 +168,9 @@ export async function saveEndpoint() {
 
     try {
         if (currentEditIndex === -1) {
-            await addEndpoint(name, url, key, transformer, model, remark);
+            await addEndpoint(name, url, key, transformer, model, remark, proxyUrl, currentClientType);
         } else {
-            await updateEndpoint(currentEditIndex, name, url, key, transformer, model, remark);
+            await updateEndpoint(currentEditIndex, name, url, key, transformer, model, remark, proxyUrl, currentClientType);
         }
 
         closeModal();
@@ -233,6 +239,7 @@ export async function fetchModels() {
     const apiUrl = document.getElementById('endpointUrl').value.trim();
     const apiKey = document.getElementById('endpointKey').value.trim();
     const transformer = document.getElementById('endpointTransformer').value;
+    const proxyUrl = document.getElementById('endpointProxyUrl').value.trim();
     const fetchBtn = document.getElementById('fetchModelsBtn');
     const fetchIcon = document.getElementById('fetchModelsIcon');
     const modelInput = document.getElementById('endpointModel');
@@ -253,7 +260,7 @@ export async function fetchModels() {
     fetchIcon.textContent = '⏳';
 
     try {
-        const resultStr = await window.go.main.App.FetchModels(apiUrl, apiKey, transformer);
+        const resultStr = await window.go.main.App.FetchModels(apiUrl, apiKey, transformer, proxyUrl);
         const result = JSON.parse(resultStr);
 
         if (result.success && result.models && result.models.length > 0) {
@@ -344,20 +351,22 @@ export async function showEditPortModal() {
     const configStr = await window.go.main.App.GetConfig();
     const config = JSON.parse(configStr);
 
-    document.getElementById('portInput').value = config.port;
+    document.getElementById('claudePortInput').value = config.claudePort || 3000;
+    document.getElementById('codexPortInput').value = config.codexPort || 3001;
     document.getElementById('portModal').classList.add('active');
 }
 
 export async function savePort() {
-    const port = parseInt(document.getElementById('portInput').value);
+    const claudePort = parseInt(document.getElementById('claudePortInput').value);
+    const codexPort = parseInt(document.getElementById('codexPortInput').value);
 
-    if (!port || port < 1 || port > 65535) {
+    if (!claudePort || claudePort < 1 || claudePort > 65535 || !codexPort || codexPort < 1 || codexPort > 65535) {
         showNotification(t('modal.portInvalid'), 'error');
         return;
     }
 
     try {
-        await updatePort(port);
+        await updatePorts(claudePort, codexPort);
         closePortModal();
         window.loadConfig();
         showNotification(t('modal.portUpdateSuccess'), 'success');

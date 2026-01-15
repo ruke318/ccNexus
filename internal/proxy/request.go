@@ -202,20 +202,26 @@ func buildProxyRequest(r *http.Request, endpoint config.Endpoint, transformedBod
 }
 
 // sendRequest sends the HTTP request and returns the response
-func sendRequest(ctx context.Context, proxyReq *http.Request, cfg *config.Config) (*http.Response, error) {
+func sendRequest(ctx context.Context, proxyReq *http.Request, endpoint config.Endpoint, cfg *config.Config) (*http.Response, error) {
 	proxyReq = proxyReq.WithContext(ctx)
 	client := &http.Client{
 		Timeout: 300 * time.Second,
 	}
 
 	// Apply proxy if configured
-	if proxyCfg := cfg.GetProxy(); proxyCfg != nil && proxyCfg.URL != "" {
-		transport, err := CreateProxyTransport(proxyCfg.URL)
+	proxyURL := endpoint.ProxyURL
+	if proxyURL == "" {
+		if proxyCfg := cfg.GetProxy(); proxyCfg != nil {
+			proxyURL = proxyCfg.URL
+		}
+	}
+	if proxyURL != "" {
+		transport, err := CreateProxyTransport(proxyURL)
 		if err != nil {
 			logger.Warn("Failed to create proxy transport: %v, using direct connection", err)
 		} else {
 			client.Transport = transport
-			logger.Debug("Using proxy: %s", proxyCfg.URL)
+			logger.Debug("Using proxy: %s", proxyURL)
 		}
 	}
 

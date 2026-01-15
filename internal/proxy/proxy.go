@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,17 +35,18 @@ type APIResponse struct {
 
 // Proxy represents the proxy server
 type Proxy struct {
-	config           *config.Config
-	stats            *Stats
-	currentIndex     int
-	mu               sync.RWMutex
-	server           *http.Server
-	activeRequests   map[string]bool              // tracks active requests by endpoint name
-	activeRequestsMu sync.RWMutex                 // protects activeRequests map
-	endpointCtx      map[string]context.Context   // context per endpoint for cancellation
-	endpointCancel   map[string]context.CancelFunc // cancel functions per endpoint
-	ctxMu            sync.RWMutex                 // protects context maps
-	onEndpointSuccess func(endpointName string)   // callback when endpoint request succeeds
+	config             *config.Config
+	stats              *Stats
+	currentIndexByType map[string]int
+	mu                 sync.RWMutex
+	servers            map[int]*http.Server
+	serverMu           sync.Mutex
+	activeRequests     map[string]bool               // tracks active requests by endpoint name
+	activeRequestsMu   sync.RWMutex                  // protects activeRequests map
+	endpointCtx        map[string]context.Context    // context per endpoint for cancellation
+	endpointCancel     map[string]context.CancelFunc // cancel functions per endpoint
+	ctxMu              sync.RWMutex                  // protects context maps
+	onEndpointSuccess  func(endpointName string)     // callback when endpoint request succeeds
 }
 
 // New creates a new Proxy instance
@@ -51,9 +54,13 @@ func New(cfg *config.Config, statsStorage StatsStorage, deviceID string) *Proxy 
 	stats := NewStats(statsStorage, deviceID)
 
 	return &Proxy{
-		config:         cfg,
-		stats:          stats,
-		currentIndex:   0,
+		config: cfg,
+		stats:  stats,
+		currentIndexByType: map[string]int{
+			"claude": 0,
+			"codex":  0,
+		},
+		servers:        make(map[int]*http.Server),
 		activeRequests: make(map[string]bool),
 		endpointCtx:    make(map[string]context.Context),
 		endpointCancel: make(map[string]context.CancelFunc),
@@ -72,7 +79,10 @@ func (p *Proxy) Start() error {
 
 // StartWithMux starts the proxy server with an optional custom mux
 func (p *Proxy) StartWithMux(customMux *http.ServeMux) error {
-	port := p.config.GetPort()
+	ports := p.config.GetListenPorts()
+	if len(ports) == 0 {
+		return fmt.Errorf("no ports configured")
+	}
 
 	var mux *http.ServeMux
 	if customMux != nil {
@@ -87,23 +97,55 @@ func (p *Proxy) StartWithMux(customMux *http.ServeMux) error {
 	mux.HandleFunc("/health", p.handleHealth)
 	mux.HandleFunc("/stats", p.handleStats)
 
-	p.server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: mux,
-	}
+	errCh := make(chan error, len(ports))
+	listeners := make([]net.Listener, 0, len(ports))
 
-	logger.Info("ccNexus starting on port %d", port)
+	p.serverMu.Lock()
+	for _, port := range ports {
+		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err != nil {
+			for _, listener := range listeners {
+				_ = listener.Close()
+			}
+			p.serverMu.Unlock()
+			return err
+		}
+		listeners = append(listeners, ln)
+
+		server := &http.Server{
+			Addr:    fmt.Sprintf(":%d", port),
+			Handler: mux,
+		}
+		p.servers[port] = server
+
+		go func(s *http.Server, listener net.Listener, port int) {
+			logger.Info("ccNexus starting on port %d", port)
+			errCh <- s.Serve(listener)
+		}(server, ln, port)
+	}
+	p.serverMu.Unlock()
 	logger.Info("Configured %d endpoints", len(p.config.GetEndpoints()))
 
-	return p.server.ListenAndServe()
+	return <-errCh
 }
 
 // Stop stops the proxy server
 func (p *Proxy) Stop() error {
-	if p.server != nil {
-		return p.server.Close()
+	p.serverMu.Lock()
+	defer p.serverMu.Unlock()
+
+	var lastErr error
+	for port, srv := range p.servers {
+		if srv == nil {
+			continue
+		}
+		if err := srv.Close(); err != nil {
+			lastErr = err
+			logger.Warn("Failed to close server on port %d: %v", port, err)
+		}
+		delete(p.servers, port)
 	}
-	return nil
+	return lastErr
 }
 
 // getEnabledEndpoints returns only the enabled endpoints
@@ -118,18 +160,30 @@ func (p *Proxy) getEnabledEndpoints() []config.Endpoint {
 	return enabled
 }
 
+// getEnabledEndpointsByType returns enabled endpoints for a client type
+func (p *Proxy) getEnabledEndpointsByType(clientType string) []config.Endpoint {
+	allEndpoints := p.config.GetEndpoints()
+	enabled := make([]config.Endpoint, 0)
+	for _, ep := range allEndpoints {
+		if ep.Enabled && ep.ClientType == clientType {
+			enabled = append(enabled, ep)
+		}
+	}
+	return enabled
+}
+
 // getCurrentEndpoint returns the current endpoint (thread-safe)
-func (p *Proxy) getCurrentEndpoint() config.Endpoint {
+func (p *Proxy) getCurrentEndpoint(clientType string) config.Endpoint {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	endpoints := p.getEnabledEndpoints()
+	endpoints := p.getEnabledEndpointsByType(clientType)
 	if len(endpoints) == 0 {
 		// Return empty endpoint if no enabled endpoints
 		return config.Endpoint{}
 	}
 	// Make sure currentIndex is within bounds
-	index := p.currentIndex % len(endpoints)
+	index := p.currentIndexByType[clientType] % len(endpoints)
 	return endpoints[index]
 }
 
@@ -155,8 +209,8 @@ func (p *Proxy) hasActiveRequests(endpointName string) bool {
 }
 
 // isCurrentEndpoint checks if the given endpoint is still the current one
-func (p *Proxy) isCurrentEndpoint(endpointName string) bool {
-	current := p.getCurrentEndpoint()
+func (p *Proxy) isCurrentEndpoint(endpointName, clientType string) bool {
+	current := p.getCurrentEndpoint(clientType)
 	return current.Name == endpointName
 }
 
@@ -189,16 +243,16 @@ func (p *Proxy) cancelEndpointRequests(endpointName string) {
 
 // rotateEndpoint switches to the next endpoint (thread-safe)
 // waitForActive: if true, waits briefly for active requests to complete before switching
-func (p *Proxy) rotateEndpoint() config.Endpoint {
+func (p *Proxy) rotateEndpoint(clientType string) config.Endpoint {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	endpoints := p.getEnabledEndpoints()
+	endpoints := p.getEnabledEndpointsByType(clientType)
 	if len(endpoints) == 0 {
 		return config.Endpoint{}
 	}
 
-	oldIndex := p.currentIndex % len(endpoints)
+	oldIndex := p.currentIndexByType[clientType] % len(endpoints)
 	oldEndpoint := endpoints[oldIndex]
 
 	// Check if there are active requests on the current endpoint
@@ -217,35 +271,35 @@ func (p *Proxy) rotateEndpoint() config.Endpoint {
 		p.mu.Lock() // Re-acquire lock
 
 		// Re-fetch endpoints after re-acquiring lock (may have changed)
-		endpoints = p.getEnabledEndpoints()
+		endpoints = p.getEnabledEndpointsByType(clientType)
 		if len(endpoints) == 0 {
 			return config.Endpoint{}
 		}
 	}
 
 	// Use oldIndex to calculate next, avoiding skip if currentIndex was modified during wait
-	p.currentIndex = (oldIndex + 1) % len(endpoints)
+	p.currentIndexByType[clientType] = (oldIndex + 1) % len(endpoints)
 
-	newEndpoint := endpoints[p.currentIndex]
-	logger.Debug("[SWITCH] %s → %s (#%d)", oldEndpoint.Name, newEndpoint.Name, p.currentIndex+1)
+	newEndpoint := endpoints[p.currentIndexByType[clientType]]
+	logger.Debug("[SWITCH] %s → %s (#%d)", oldEndpoint.Name, newEndpoint.Name, p.currentIndexByType[clientType]+1)
 
 	return newEndpoint
 }
 
 // GetCurrentEndpointName returns the current endpoint name (thread-safe)
-func (p *Proxy) GetCurrentEndpointName() string {
-	endpoint := p.getCurrentEndpoint()
+func (p *Proxy) GetCurrentEndpointName(clientType string) string {
+	endpoint := p.getCurrentEndpoint(clientType)
 	return endpoint.Name
 }
 
 // SetCurrentEndpoint manually switches to a specific endpoint by name
 // Returns error if endpoint not found or not enabled
 // Thread-safe and cancels ongoing requests on the old endpoint
-func (p *Proxy) SetCurrentEndpoint(targetName string) error {
+func (p *Proxy) SetCurrentEndpoint(targetName, clientType string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	endpoints := p.getEnabledEndpoints()
+	endpoints := p.getEnabledEndpointsByType(clientType)
 	if len(endpoints) == 0 {
 		return fmt.Errorf("no enabled endpoints")
 	}
@@ -253,12 +307,12 @@ func (p *Proxy) SetCurrentEndpoint(targetName string) error {
 	// Find the endpoint by name
 	for i, ep := range endpoints {
 		if ep.Name == targetName {
-			oldEndpoint := endpoints[p.currentIndex%len(endpoints)]
+			oldEndpoint := endpoints[p.currentIndexByType[clientType]%len(endpoints)]
 			if oldEndpoint.Name != targetName {
 				// Cancel all requests on the old endpoint
 				p.cancelEndpointRequests(oldEndpoint.Name)
 			}
-			p.currentIndex = i
+			p.currentIndexByType[clientType] = i
 			logger.Info("[MANUAL SWITCH] %s → %s", oldEndpoint.Name, ep.Name)
 			return nil
 		}
@@ -288,6 +342,50 @@ func detectClientFormat(path string) ClientFormat {
 	}
 }
 
+func requestPort(r *http.Request) int {
+	if r == nil {
+		return 0
+	}
+	host := r.Host
+	if host == "" {
+		host = r.URL.Host
+	}
+	if host == "" {
+		return 0
+	}
+	if strings.Contains(host, ":") {
+		_, portStr, err := net.SplitHostPort(host)
+		if err == nil {
+			if port, err := strconv.Atoi(portStr); err == nil {
+				return port
+			}
+		}
+	}
+	return 0
+}
+
+func detectClientType(r *http.Request, clientFormat ClientFormat, cfg *config.Config) string {
+	claudePort := cfg.GetClaudePort()
+	codexPort := cfg.GetCodexPort()
+	if claudePort != codexPort {
+		if port := requestPort(r); port != 0 {
+			if port == codexPort {
+				return "codex"
+			}
+			if port == claudePort {
+				return "claude"
+			}
+		}
+	}
+
+	switch clientFormat {
+	case ClientFormatOpenAIChat, ClientFormatOpenAIResponses:
+		return "codex"
+	default:
+		return "claude"
+	}
+}
+
 // handleProxy handles the main proxy logic
 func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)
@@ -300,6 +398,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Detect client format
 	clientFormat := detectClientFormat(r.URL.Path)
+	clientType := detectClientType(r, clientFormat, p.config)
 
 	logger.DebugLog("=== Proxy Request ===")
 	logger.DebugLog("Method: %s, Path: %s, ClientFormat: %s", r.Method, r.URL.Path, clientFormat)
@@ -312,7 +411,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	json.Unmarshal(bodyBytes, &streamReq)
 
-	endpoints := p.getEnabledEndpoints()
+	endpoints := p.getEnabledEndpointsByType(clientType)
 	if len(endpoints) == 0 {
 		logger.Error("No enabled endpoints available")
 		http.Error(w, "No enabled endpoints configured", http.StatusServiceUnavailable)
@@ -324,7 +423,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	lastEndpointName := ""
 
 	for retry := 0; retry < maxRetries; retry++ {
-		endpoint := p.getCurrentEndpoint()
+		endpoint := p.getCurrentEndpoint(clientType)
 		if endpoint.Name == "" {
 			http.Error(w, "No enabled endpoints available", http.StatusServiceUnavailable)
 			return
@@ -346,7 +445,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.stats.RecordError(endpoint.Name)
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= 2 {
-				p.rotateEndpoint()
+				p.rotateEndpoint(clientType)
 				endpointAttempts = 0
 			}
 			continue
@@ -360,7 +459,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.stats.RecordError(endpoint.Name)
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= 2 {
-				p.rotateEndpoint()
+				p.rotateEndpoint(clientType)
 				endpointAttempts = 0
 			}
 			continue
@@ -392,20 +491,20 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.stats.RecordError(endpoint.Name)
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= 2 {
-				p.rotateEndpoint()
+				p.rotateEndpoint(clientType)
 				endpointAttempts = 0
 			}
 			continue
 		}
 
 		ctx := p.getEndpointContext(endpoint.Name)
-		resp, err := sendRequest(ctx, proxyReq, p.config)
+		resp, err := sendRequest(ctx, proxyReq, endpoint, p.config)
 		if err != nil {
 			logger.Error("[%s] Request failed: %v", endpoint.Name, err)
 			p.stats.RecordError(endpoint.Name)
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= 2 {
-				p.rotateEndpoint()
+				p.rotateEndpoint(clientType)
 				endpointAttempts = 0
 			}
 			continue
@@ -461,7 +560,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.stats.RecordError(endpoint.Name)
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= 2 {
-				p.rotateEndpoint()
+				p.rotateEndpoint(clientType)
 				endpointAttempts = 0
 			}
 			continue

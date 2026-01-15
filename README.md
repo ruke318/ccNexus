@@ -58,6 +58,7 @@
 }
 
 ```
+默认 Claude 端口为 `3000`，如有调整请将 `ANTHROPIC_BASE_URL` 指向 Claude 端口。
 
 #### Codex CLI
 只需要配置 `~/.codex/config.toml`：
@@ -68,11 +69,12 @@ preferred_auth_method = "apikey"
 
 [model_providers.ccNexus]
 name = "ccNexus"
-base_url = "http://localhost:3000/v1"
+base_url = "http://localhost:3001/v1"
 wire_api = "responses"  # 或 "chat"
 
 # 其他配置
 ```
+默认 Codex 端口为 `3001`，如有调整请将 `base_url` 指向 Codex 端口。
 
 `~/.codex/auth.json` 可以忽略了。
 

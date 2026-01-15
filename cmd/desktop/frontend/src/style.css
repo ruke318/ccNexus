@@ -521,6 +521,58 @@ body {
     overflow: visible;
 }
 
+.endpoint-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.endpoint-tab-btn {
+    border: 1px solid #ddd;
+    background: #f8f9fa;
+    color: #555;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.endpoint-tab-btn:hover {
+    background: #eef1f5;
+    border-color: #cfd6df;
+}
+
+.endpoint-tab-btn.active {
+    background: #2c7a7b;
+    border-color: #2c7a7b;
+    color: #fff;
+}
+
+.endpoint-tab-content {
+    display: none;
+}
+
+.endpoint-tab-content.active {
+    display: block;
+}
+
+.endpoint-header-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
+.endpoint-add-btn {
+    display: none;
+}
+
+.endpoint-add-btn.active {
+    display: inline-flex;
+}
+
 .endpoint-list {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4417,4 +4469,3 @@ body {
     font-weight: 500;
     color: var(--primary-color, #667eea);
 }
-

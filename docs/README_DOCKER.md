@@ -86,8 +86,8 @@ http://localhost:3021/ui/
 #### 配置管理
 - `GET /api/config` - 获取配置
 - `PUT /api/config` - 更新配置
-- `GET /api/config/port` - 获取代理端口
-- `PUT /api/config/port` - 更新代理端口
+- `GET /api/config/port` - 获取 Claude/Codex 端口
+- `PUT /api/config/port` - 更新 Claude/Codex 端口
 - `GET /api/config/log-level` - 获取日志级别
 - `PUT /api/config/log-level` - 设置日志级别
 

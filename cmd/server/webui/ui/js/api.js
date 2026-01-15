@@ -102,12 +102,12 @@ class APIClient {
         return this.request('PUT', '/config', data);
     }
 
-    async getPort() {
+    async getPorts() {
         return this.request('GET', '/config/port');
     }
 
-    async updatePort(port) {
-        return this.request('PUT', '/config/port', { port });
+    async updatePorts(claudePort, codexPort) {
+        return this.request('PUT', '/config/port', { claudePort, codexPort });
     }
 
     async getLogLevel() {

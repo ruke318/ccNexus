@@ -108,6 +108,8 @@ func (h *Handler) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		Transformer string `json:"transformer"`
 		Model       string `json:"model"`
 		Remark      string `json:"remark"`
+		ClientType  string `json:"clientType"`
+		ProxyURL    string `json:"proxyUrl"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -137,6 +139,14 @@ func (h *Handler) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.ClientType == "" {
+		req.ClientType = config.InferClientType(req.Transformer)
+	}
+	if req.ClientType != "claude" && req.ClientType != "codex" {
+		WriteError(w, http.StatusBadRequest, "Invalid client type")
+		return
+	}
+
 	// Create new endpoint
 	endpoint := &storage.Endpoint{
 		Name:        req.Name,
@@ -146,6 +156,8 @@ func (h *Handler) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		Transformer: req.Transformer,
 		Model:       req.Model,
 		Remark:      req.Remark,
+		ClientType:  req.ClientType,
+		ProxyURL:    req.ProxyURL,
 		SortOrder:   len(endpoints),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -176,6 +188,8 @@ func (h *Handler) updateEndpoint(w http.ResponseWriter, r *http.Request, name st
 		Transformer string `json:"transformer"`
 		Model       string `json:"model"`
 		Remark      string `json:"remark"`
+		ClientType  string `json:"clientType"`
+		ProxyURL    string `json:"proxyUrl"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -222,6 +236,16 @@ func (h *Handler) updateEndpoint(w http.ResponseWriter, r *http.Request, name st
 		existing.Model = req.Model
 	}
 	existing.Remark = req.Remark
+	if req.ClientType != "" {
+		if req.ClientType != "claude" && req.ClientType != "codex" {
+			WriteError(w, http.StatusBadRequest, "Invalid client type")
+			return
+		}
+		existing.ClientType = req.ClientType
+	} else if existing.ClientType == "" {
+		existing.ClientType = config.InferClientType(existing.Transformer)
+	}
+	existing.ProxyURL = req.ProxyURL
 	existing.UpdatedAt = time.Now()
 
 	if err := h.storage.UpdateEndpoint(existing); err != nil {
@@ -320,6 +344,15 @@ func (h *Handler) handleCurrentEndpoint(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	clientType := r.URL.Query().Get("clientType")
+	if clientType == "" {
+		clientType = "claude"
+	}
+	if clientType != "claude" && clientType != "codex" {
+		WriteError(w, http.StatusBadRequest, "Invalid client type")
+		return
+	}
+
 	endpoints := h.config.GetEndpoints()
 	if len(endpoints) == 0 {
 		WriteError(w, http.StatusNotFound, "No endpoints configured")
@@ -329,7 +362,7 @@ func (h *Handler) handleCurrentEndpoint(w http.ResponseWriter, r *http.Request) 
 	// Get enabled endpoints
 	var enabledEndpoints []config.Endpoint
 	for _, ep := range endpoints {
-		if ep.Enabled {
+		if ep.Enabled && ep.ClientType == clientType {
 			enabledEndpoints = append(enabledEndpoints, ep)
 		}
 	}
@@ -341,7 +374,8 @@ func (h *Handler) handleCurrentEndpoint(w http.ResponseWriter, r *http.Request) 
 
 	// Return first enabled endpoint as current
 	WriteSuccess(w, map[string]interface{}{
-		"name": enabledEndpoints[0].Name,
+		"name":       enabledEndpoints[0].Name,
+		"clientType": clientType,
 	})
 }
 
@@ -353,7 +387,8 @@ func (h *Handler) handleSwitchEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name string `json:"name"`
+		Name       string `json:"name"`
+		ClientType string `json:"clientType"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -361,11 +396,19 @@ func (h *Handler) handleSwitchEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ClientType == "" {
+		req.ClientType = "claude"
+	}
+	if req.ClientType != "claude" && req.ClientType != "codex" {
+		WriteError(w, http.StatusBadRequest, "Invalid client type")
+		return
+	}
+
 	// Verify endpoint exists
 	endpoints := h.config.GetEndpoints()
 	found := false
 	for _, ep := range endpoints {
-		if ep.Name == req.Name && ep.Enabled {
+		if ep.Name == req.Name && ep.Enabled && ep.ClientType == req.ClientType {
 			found = true
 			break
 		}
@@ -377,8 +420,9 @@ func (h *Handler) handleSwitchEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	WriteSuccess(w, map[string]interface{}{
-		"message": "Endpoint switched successfully",
-		"name":    req.Name,
+		"message":    "Endpoint switched successfully",
+		"name":       req.Name,
+		"clientType": req.ClientType,
 	})
 }
 
@@ -390,11 +434,20 @@ func (h *Handler) handleReorderEndpoints(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
-		Names []string `json:"names"`
+		Names      []string `json:"names"`
+		ClientType string   `json:"clientType"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if req.ClientType == "" {
+		req.ClientType = "claude"
+	}
+	if req.ClientType != "claude" && req.ClientType != "codex" {
+		WriteError(w, http.StatusBadRequest, "Invalid client type")
 		return
 	}
 
@@ -409,17 +462,45 @@ func (h *Handler) handleReorderEndpoints(w http.ResponseWriter, r *http.Request)
 	// Create a map for quick lookup
 	endpointMap := make(map[string]*storage.Endpoint)
 	for i := range endpoints {
-		endpointMap[endpoints[i].Name] = &endpoints[i]
+		if endpoints[i].ClientType == req.ClientType {
+			endpointMap[endpoints[i].Name] = &endpoints[i]
+		}
 	}
 
-	// Update sort order
-	for i, name := range req.Names {
-		if ep, ok := endpointMap[name]; ok {
-			ep.SortOrder = i
-			ep.UpdatedAt = time.Now()
-			if err := h.storage.UpdateEndpoint(ep); err != nil {
-				logger.Error("Failed to update endpoint sort order: %v", err)
-			}
+	if len(req.Names) != len(endpointMap) {
+		WriteError(w, http.StatusBadRequest, "Invalid reorder size")
+		return
+	}
+
+	reorderedTargets := make([]*storage.Endpoint, 0, len(req.Names))
+	for _, name := range req.Names {
+		ep, ok := endpointMap[name]
+		if !ok {
+			WriteError(w, http.StatusBadRequest, "Endpoint not found")
+			return
+		}
+		reorderedTargets = append(reorderedTargets, ep)
+	}
+
+	// Build final order while keeping other client types in place
+	finalOrder := make([]*storage.Endpoint, 0, len(endpoints))
+	targetIndex := 0
+	for i := range endpoints {
+		ep := &endpoints[i]
+		if ep.ClientType == req.ClientType {
+			finalOrder = append(finalOrder, reorderedTargets[targetIndex])
+			targetIndex++
+		} else {
+			finalOrder = append(finalOrder, ep)
+		}
+	}
+
+	// Update sort order for all endpoints
+	for i, ep := range finalOrder {
+		ep.SortOrder = i
+		ep.UpdatedAt = time.Now()
+		if err := h.storage.UpdateEndpoint(ep); err != nil {
+			logger.Error("Failed to update endpoint sort order: %v", err)
 		}
 	}
 

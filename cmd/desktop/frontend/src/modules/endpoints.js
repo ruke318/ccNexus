@@ -5,6 +5,7 @@ import { toggleEndpoint, testAllEndpointsZeroCost } from './config.js';
 
 const ENDPOINT_TEST_STATUS_KEY = 'ccNexus_endpointTestStatus';
 const ENDPOINT_VIEW_MODE_KEY = 'ccNexus_endpointViewMode';
+const ENDPOINT_TAB_KEY = 'ccNexus_endpointTab';
 
 // 获取端点测试状态
 export function getEndpointTestStatus(endpointName) {
@@ -45,6 +46,43 @@ export function saveEndpointViewMode(mode) {
     }
 }
 
+export function getEndpointTab() {
+    try {
+        return localStorage.getItem(ENDPOINT_TAB_KEY) || 'claude';
+    } catch {
+        return 'claude';
+    }
+}
+
+export function saveEndpointTab(tab) {
+    try {
+        localStorage.setItem(ENDPOINT_TAB_KEY, tab);
+    } catch (error) {
+        console.error('Failed to save endpoint tab:', error);
+    }
+}
+
+export function switchEndpointTab(tab) {
+    const normalized = tab === 'codex' ? 'codex' : 'claude';
+    saveEndpointTab(normalized);
+
+    const buttons = document.querySelectorAll('.endpoint-tab-btn');
+    buttons.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === normalized);
+    });
+
+    const contents = document.querySelectorAll('.endpoint-tab-content');
+    contents.forEach(content => {
+        content.classList.toggle('active', content.dataset.tab === normalized);
+    });
+
+    const addButtons = document.querySelectorAll('.endpoint-add-btn');
+    addButtons.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === normalized);
+    });
+
+}
+
 // 切换视图模式
 export function switchEndpointViewMode(mode) {
     saveEndpointViewMode(mode);
@@ -56,12 +94,14 @@ export function switchEndpointViewMode(mode) {
     });
 
     // 更新列表样式
-    const container = document.getElementById('endpointList');
-    if (mode === 'compact') {
-        container.classList.add('compact-view');
-    } else {
-        container.classList.remove('compact-view');
-    }
+    const containers = document.querySelectorAll('.endpoint-list');
+    containers.forEach(container => {
+        if (mode === 'compact') {
+            container.classList.add('compact-view');
+        } else {
+            container.classList.remove('compact-view');
+        }
+    });
 
     // 重新渲染端点列表
     window.loadConfig();
@@ -74,6 +114,10 @@ export function initEndpointViewMode() {
     buttons.forEach(btn => {
         btn.classList.toggle('active', btn.dataset.view === mode);
     });
+}
+
+export function initEndpointTab() {
+    switchEndpointTab(getEndpointTab());
 }
 
 let currentTestButton = null;
@@ -120,13 +164,17 @@ export function setTestState(button, index) {
     currentTestIndex = index;
 }
 
-export async function renderEndpoints(endpoints) {
-    const container = document.getElementById('endpointList');
+export async function renderEndpoints(endpoints, clientType, containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) {
+        return;
+    }
+    container.dataset.clientType = clientType;
 
     // Get current endpoint from backend
     let currentEndpointName = '';
     try {
-        currentEndpointName = await window.go.main.App.GetCurrentEndpoint();
+        currentEndpointName = await window.go.main.App.GetCurrentEndpoint(clientType);
     } catch (error) {
         console.error('Failed to get current endpoint:', error);
     }
@@ -145,16 +193,17 @@ export async function renderEndpoints(endpoints) {
     const endpointStats = getEndpointStats();
     // Display endpoints in config file order (no sorting by enabled status)
     const sortedEndpoints = endpoints.map((ep, index) => {
+        const originalIndex = ep._index ?? index;
         const stats = endpointStats[ep.name] || { requests: 0, errors: 0, inputTokens: 0, outputTokens: 0 };
         const enabled = ep.enabled !== undefined ? ep.enabled : true;
-        return { endpoint: ep, originalIndex: index, stats, enabled };
+        return { endpoint: ep, originalIndex, stats, enabled };
     });
 
     // 检查视图模式
     const viewMode = getEndpointViewMode();
     if (viewMode === 'compact') {
         container.classList.add('compact-view');
-        renderCompactView(sortedEndpoints, container, currentEndpointName);
+        renderCompactView(sortedEndpoints, container, currentEndpointName, clientType);
         return;
     } else {
         container.classList.remove('compact-view');
@@ -261,7 +310,7 @@ export async function renderEndpoints(endpoints) {
                 try {
                     switchBtn.disabled = true;
                     switchBtn.innerHTML = '⏳';
-                    await window.go.main.App.SwitchToEndpoint(name);
+                    await window.go.main.App.SwitchToEndpoint(name, clientType);
                     window.loadConfig(); // Refresh display
                 } catch (error) {
                     console.error('Failed to switch endpoint:', error);
@@ -276,7 +325,7 @@ export async function renderEndpoints(endpoints) {
         }
 
         // Add drag and drop event listeners
-        setupDragAndDrop(item, container);
+        setupDragAndDrop(item, container, clientType);
 
         container.appendChild(item);
     });
@@ -324,7 +373,7 @@ function autoScroll(e) {
 }
 
 // Setup drag and drop for an endpoint item
-function setupDragAndDrop(item, container) {
+function setupDragAndDrop(item, container, clientType) {
     item.addEventListener('dragstart', (e) => {
         draggedElement = item;
         draggedOriginalName = item.dataset.name;
@@ -412,7 +461,7 @@ function setupDragAndDrop(item, container) {
 
             // Save to backend
             try {
-                await window.go.main.App.ReorderEndpoints(newOrder);
+                await window.go.main.App.ReorderEndpoints(newOrder, clientType);
                 window.loadConfig();
             } catch (error) {
                 console.error('Failed to reorder endpoints:', error);
@@ -473,7 +522,7 @@ export async function checkAllEndpointsOnStartup() {
 }
 
 // 渲染简洁视图
-function renderCompactView(sortedEndpoints, container, currentEndpointName) {
+function renderCompactView(sortedEndpoints, container, currentEndpointName, clientType) {
     sortedEndpoints.forEach(({ endpoint: ep, originalIndex: index, stats }) => {
         const enabled = ep.enabled !== undefined ? ep.enabled : true;
         const transformer = ep.transformer || 'claude';
@@ -540,7 +589,7 @@ function renderCompactView(sortedEndpoints, container, currentEndpointName) {
         `;
 
         // 绑定事件
-        bindCompactItemEvents(item, index, enabled);
+        bindCompactItemEvents(item, index, enabled, clientType);
 
         // 设置拖拽
         setupCompactDragAndDrop(item, container);
@@ -554,7 +603,7 @@ function renderCompactView(sortedEndpoints, container, currentEndpointName) {
 }
 
 // 绑定简洁视图项目事件
-function bindCompactItemEvents(item, index, enabled) {
+function bindCompactItemEvents(item, index, enabled, clientType) {
     const toggleSwitch = item.querySelector('input[type="checkbox"]');
     const switchBtn = item.querySelector('[data-action="switch"]');
     const moreBtn = item.querySelector('[data-action="more"]');
@@ -591,8 +640,8 @@ function bindCompactItemEvents(item, index, enabled) {
             try {
                 switchBtn.disabled = true;
                 switchBtn.innerHTML = '⏳';
-                await window.go.main.App.SwitchToEndpoint(name);
-                window.loadConfig(); // Refresh display
+            await window.go.main.App.SwitchToEndpoint(name, clientType);
+            window.loadConfig(); // Refresh display
             } catch (error) {
                 console.error('Failed to switch endpoint:', error);
                 alert(t('endpoints.switchFailed') + ': ' + error);
@@ -863,8 +912,9 @@ async function handleContainerDrop(e) {
         const orderChanged = !currentOrder.every((name, idx) => name === newOrder[idx]);
         if (!orderChanged) return;
 
+        const clientType = container.dataset.clientType || 'claude';
         try {
-            await window.go.main.App.ReorderEndpoints(newOrder);
+            await window.go.main.App.ReorderEndpoints(newOrder, clientType);
             window.loadConfig();
         } catch (error) {
             console.error('Failed to reorder endpoints:', error);

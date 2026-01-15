@@ -12,7 +12,7 @@ Right-click the app → Select "Open" → Click "Open". Or allow it in "System P
 
 **Q: Port is in use?**
 
-Click the port number at the top of the interface and change it to another port (e.g., 3001).
+Click the Claude/Codex port numbers at the top of the interface and change them to other ports (e.g., 3001/3002).
 
 ## Endpoint Configuration
 

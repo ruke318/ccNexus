@@ -119,6 +119,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         const configStr = await window.go.main.App.GetConfig();
         if (configStr) {
             const config = JSON.parse(configStr);
+            window.latestConfig = config;
             const claudeEndpoints = config.endpoints.filter(ep => (ep.clientType || 'claude') === 'claude');
             const codexEndpoints = config.endpoints.filter(ep => (ep.clientType || 'claude') === 'codex');
             renderEndpoints(claudeEndpoints, 'claude', 'endpointListClaude');

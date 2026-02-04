@@ -231,11 +231,13 @@ func (s *SQLiteStorage) SaveEndpoint(ep *Endpoint) error {
 		return err
 	}
 
-	id, err := result.LastInsertId()
-	if err != nil {
-		return err
+	if ep.ID == 0 {
+		id, err := result.LastInsertId()
+		if err != nil {
+			return err
+		}
+		ep.ID = id
 	}
-	ep.ID = id
 	return nil
 }
 
@@ -243,16 +245,19 @@ func (s *SQLiteStorage) UpdateEndpoint(ep *Endpoint) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.db.Exec(`UPDATE endpoints SET api_url=?, api_key=?, enabled=?, transformer=?, model=?, remark=?, client_type=?, proxy_url=?, sort_order=?, updated_at=CURRENT_TIMESTAMP WHERE name=?`,
-		ep.APIUrl, ep.APIKey, ep.Enabled, ep.Transformer, ep.Model, ep.Remark, ep.ClientType, ep.ProxyURL, ep.SortOrder, ep.Name)
+	if ep.ID == 0 {
+		return fmt.Errorf("missing endpoint id for update: %s", ep.Name)
+	}
+	_, err := s.db.Exec(`UPDATE endpoints SET name=?, api_url=?, api_key=?, enabled=?, transformer=?, model=?, remark=?, client_type=?, proxy_url=?, sort_order=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		ep.Name, ep.APIUrl, ep.APIKey, ep.Enabled, ep.Transformer, ep.Model, ep.Remark, ep.ClientType, ep.ProxyURL, ep.SortOrder, ep.ID)
 	return err
 }
 
-func (s *SQLiteStorage) DeleteEndpoint(name string) error {
+func (s *SQLiteStorage) DeleteEndpoint(id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.db.Exec(`DELETE FROM endpoints WHERE name=?`, name)
+	_, err := s.db.Exec(`DELETE FROM endpoints WHERE id=?`, id)
 	return err
 }
 

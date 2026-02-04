@@ -265,7 +265,26 @@ func (h *Handler) updateEndpoint(w http.ResponseWriter, r *http.Request, name st
 
 // deleteEndpoint deletes an endpoint
 func (h *Handler) deleteEndpoint(w http.ResponseWriter, r *http.Request, name string) {
-	if err := h.storage.DeleteEndpoint(name); err != nil {
+	endpoints, err := h.storage.GetEndpoints()
+	if err != nil {
+		logger.Error("Failed to get endpoints: %v", err)
+		WriteError(w, http.StatusInternalServerError, "Failed to get endpoints")
+		return
+	}
+
+	var endpointID int64
+	for _, ep := range endpoints {
+		if ep.Name == name {
+			endpointID = ep.ID
+			break
+		}
+	}
+	if endpointID == 0 {
+		WriteError(w, http.StatusNotFound, "Endpoint not found")
+		return
+	}
+
+	if err := h.storage.DeleteEndpoint(endpointID); err != nil {
 		logger.Error("Failed to delete endpoint: %v", err)
 		WriteError(w, http.StatusInternalServerError, "Failed to delete endpoint")
 		return

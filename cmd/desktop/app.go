@@ -371,12 +371,12 @@ func (a *App) GetStatsTrendByPeriod(period string) string {
 func (a *App) AddEndpoint(name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType string) error {
 	return a.endpoint.AddEndpoint(name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType)
 }
-func (a *App) RemoveEndpoint(index int) error { return a.endpoint.RemoveEndpoint(index) }
-func (a *App) UpdateEndpoint(index int, name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType string) error {
-	return a.endpoint.UpdateEndpoint(index, name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType)
+func (a *App) RemoveEndpoint(id int64) error { return a.endpoint.RemoveEndpoint(id) }
+func (a *App) UpdateEndpoint(id int64, name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType string) error {
+	return a.endpoint.UpdateEndpoint(id, name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType)
 }
-func (a *App) ToggleEndpoint(index int, enabled bool) error {
-	return a.endpoint.ToggleEndpoint(index, enabled)
+func (a *App) ToggleEndpoint(id int64, enabled bool) error {
+	return a.endpoint.ToggleEndpoint(id, enabled)
 }
 func (a *App) ReorderEndpoints(names []string, clientType string) error {
 	return a.endpoint.ReorderEndpoints(names, clientType)
@@ -387,9 +387,9 @@ func (a *App) GetCurrentEndpoint(clientType string) string {
 func (a *App) SwitchToEndpoint(endpointName, clientType string) error {
 	return a.endpoint.SwitchToEndpoint(endpointName, clientType)
 }
-func (a *App) TestEndpoint(index int) string      { return a.endpoint.TestEndpoint(index) }
-func (a *App) TestEndpointLight(index int) string { return a.endpoint.TestEndpointLight(index) }
-func (a *App) TestAllEndpointsZeroCost() string   { return a.endpoint.TestAllEndpointsZeroCost() }
+func (a *App) TestEndpoint(id int64) string      { return a.endpoint.TestEndpoint(id) }
+func (a *App) TestEndpointLight(id int64) string { return a.endpoint.TestEndpointLight(id) }
+func (a *App) TestAllEndpointsZeroCost() string  { return a.endpoint.TestAllEndpointsZeroCost() }
 func (a *App) FetchModels(apiUrl, apiKey, transformer, proxyURL string) string {
 	return a.endpoint.FetchModels(apiUrl, apiKey, transformer, proxyURL)
 }

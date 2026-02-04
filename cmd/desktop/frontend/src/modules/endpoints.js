@@ -8,20 +8,20 @@ const ENDPOINT_VIEW_MODE_KEY = 'ccNexus_endpointViewMode';
 const ENDPOINT_TAB_KEY = 'ccNexus_endpointTab';
 
 // 获取端点测试状态
-export function getEndpointTestStatus(endpointName) {
+export function getEndpointTestStatus(endpointID) {
     try {
         const statusMap = JSON.parse(localStorage.getItem(ENDPOINT_TEST_STATUS_KEY) || '{}');
-        return statusMap[endpointName]; // true=成功, false=失败, undefined=未测试
+        return statusMap[String(endpointID)]; // true=成功, false=失败, undefined=未测试
     } catch {
         return undefined;
     }
 }
 
 // 保存端点测试状态
-export function saveEndpointTestStatus(endpointName, success) {
+export function saveEndpointTestStatus(endpointID, success) {
     try {
         const statusMap = JSON.parse(localStorage.getItem(ENDPOINT_TEST_STATUS_KEY) || '{}');
-        statusMap[endpointName] = success;
+        statusMap[String(endpointID)] = success;
         localStorage.setItem(ENDPOINT_TEST_STATUS_KEY, JSON.stringify(statusMap));
     } catch (error) {
         console.error('Failed to save endpoint test status:', error);
@@ -122,7 +122,7 @@ export function initEndpointTab() {
 
 let currentTestButton = null;
 let currentTestButtonOriginalText = '';
-let currentTestIndex = -1;
+let currentTestID = 0;
 let endpointPanelExpanded = true;
 
 function copyToClipboard(text, button) {
@@ -134,7 +134,7 @@ function copyToClipboard(text, button) {
 }
 
 export function getTestState() {
-    return { currentTestButton, currentTestIndex };
+    return { currentTestButton, currentTestID };
 }
 
 export function clearTestState() {
@@ -154,14 +154,14 @@ export function clearTestState() {
 
         currentTestButton = null;
         currentTestButtonOriginalText = '';
-        currentTestIndex = -1;
+        currentTestID = 0;
     }
 }
 
-export function setTestState(button, index) {
+export function setTestState(button, id) {
     currentTestButton = button;
     currentTestButtonOriginalText = button.innerHTML;
-    currentTestIndex = index;
+    currentTestID = id;
 }
 
 export async function renderEndpoints(endpoints, clientType, containerId) {
@@ -192,11 +192,10 @@ export async function renderEndpoints(endpoints, clientType, containerId) {
 
     const endpointStats = getEndpointStats();
     // Display endpoints in config file order (no sorting by enabled status)
-    const sortedEndpoints = endpoints.map((ep, index) => {
-        const originalIndex = ep._index ?? index;
+    const sortedEndpoints = endpoints.map((ep) => {
         const stats = endpointStats[ep.name] || { requests: 0, errors: 0, inputTokens: 0, outputTokens: 0 };
         const enabled = ep.enabled !== undefined ? ep.enabled : true;
-        return { endpoint: ep, originalIndex, stats, enabled };
+        return { endpoint: ep, stats, enabled };
     });
 
     // 检查视图模式
@@ -209,20 +208,21 @@ export async function renderEndpoints(endpoints, clientType, containerId) {
         container.classList.remove('compact-view');
     }
 
-    sortedEndpoints.forEach(({ endpoint: ep, originalIndex: index, stats }) => {
+    sortedEndpoints.forEach(({ endpoint: ep, stats }) => {
         const totalTokens = stats.inputTokens + stats.outputTokens;
         const enabled = ep.enabled !== undefined ? ep.enabled : true;
         const transformer = ep.transformer || 'claude';
         const model = ep.model || '';
+        const endpointID = ep.id || 0;
         const isCurrentEndpoint = ep.name === currentEndpointName;
 
         const item = document.createElement('div');
         item.className = 'endpoint-item';
         item.draggable = true;
         item.dataset.name = ep.name;
-        item.dataset.index = index;
+        item.dataset.id = endpointID;
         // 获取测试状态：true=成功显示✅，false=失败显示❌，undefined/unknown=未测试/未知显示⚠️
-        const testStatus = getEndpointTestStatus(ep.name);
+        const testStatus = endpointID ? getEndpointTestStatus(endpointID) : undefined;
         let testStatusIcon = '⚠️';
         let testStatusTip = t('endpoints.testTipUnknown');
         if (testStatus === true) {
@@ -251,12 +251,12 @@ export async function renderEndpoints(endpoints, clientType, containerId) {
             </div>
             <div class="endpoint-actions">
                 <label class="toggle-switch">
-                    <input type="checkbox" data-index="${index}" ${enabled ? 'checked' : ''}>
+                    <input type="checkbox" data-id="${endpointID}" ${enabled ? 'checked' : ''}>
                     <span class="toggle-slider"></span>
                 </label>
-                <button class="btn-card btn-secondary" data-action="test" data-index="${index}">${t('endpoints.test')}</button>
-                <button class="btn-card btn-secondary" data-action="edit" data-index="${index}">${t('endpoints.edit')}</button>
-                <button class="btn-card btn-danger" data-action="delete" data-index="${index}">${t('endpoints.delete')}</button>
+                <button class="btn-card btn-secondary" data-action="test" data-id="${endpointID}">${t('endpoints.test')}</button>
+                <button class="btn-card btn-secondary" data-action="edit" data-id="${endpointID}">${t('endpoints.edit')}</button>
+                <button class="btn-card btn-danger" data-action="delete" data-id="${endpointID}">${t('endpoints.delete')}</button>
             </div>
         `;
 
@@ -266,29 +266,29 @@ export async function renderEndpoints(endpoints, clientType, containerId) {
         const toggleSwitch = item.querySelector('input[type="checkbox"]');
         const copyBtns = item.querySelectorAll('.copy-btn');
 
-        if (currentTestIndex === index) {
+        if (currentTestID !== 0 && currentTestID === endpointID) {
             testBtn.disabled = true;
             testBtn.innerHTML = '⏳';
             currentTestButton = testBtn;
         }
 
         testBtn.addEventListener('click', () => {
-            const idx = parseInt(testBtn.getAttribute('data-index'));
-            window.testEndpoint(idx, testBtn);
+            const id = parseInt(testBtn.getAttribute('data-id'));
+            window.testEndpoint(id, testBtn);
         });
         editBtn.addEventListener('click', () => {
-            const idx = parseInt(editBtn.getAttribute('data-index'));
-            window.editEndpoint(idx);
+            const id = parseInt(editBtn.getAttribute('data-id'));
+            window.editEndpoint(id);
         });
         deleteBtn.addEventListener('click', () => {
-            const idx = parseInt(deleteBtn.getAttribute('data-index'));
-            window.deleteEndpoint(idx);
+            const id = parseInt(deleteBtn.getAttribute('data-id'));
+            window.deleteEndpoint(id);
         });
         toggleSwitch.addEventListener('change', async (e) => {
-            const idx = parseInt(e.target.getAttribute('data-index'));
+            const id = parseInt(e.target.getAttribute('data-id'));
             const newEnabled = e.target.checked;
             try {
-                await toggleEndpoint(idx, newEnabled);
+                await toggleEndpoint(id, newEnabled);
                 window.loadConfig();
             } catch (error) {
                 console.error('Failed to toggle endpoint:', error);
@@ -478,8 +478,15 @@ function setupDragAndDrop(item, container, clientType) {
 export function initEndpointSuccessListener() {
     if (window.runtime && window.runtime.EventsOn) {
         window.runtime.EventsOn('endpoint:success', (endpointName) => {
-            // 更新测试状态为成功
-            saveEndpointTestStatus(endpointName, true);
+            let endpointID = 0;
+            if (window.latestConfig?.endpoints) {
+                const endpoint = window.latestConfig.endpoints.find(ep => ep.name === endpointName);
+                endpointID = endpoint?.id || 0;
+            }
+            if (endpointID) {
+                // 更新测试状态为成功
+                saveEndpointTestStatus(endpointID, true);
+            }
             // 刷新端点列表显示
             if (window.loadConfig) {
                 window.loadConfig();
@@ -504,11 +511,27 @@ export async function checkAllEndpointsOnStartup() {
         clearAllEndpointTestStatus();
 
         const results = await testAllEndpointsZeroCost();
+        let nameToID = {};
+        if (window.latestConfig?.endpoints) {
+            nameToID = Object.fromEntries(window.latestConfig.endpoints.map(ep => [ep.name, ep.id]));
+        } else {
+            try {
+                const configStr = await window.go.main.App.GetConfig();
+                const config = JSON.parse(configStr);
+                nameToID = Object.fromEntries(config.endpoints.map(ep => [ep.name, ep.id]));
+            } catch (error) {
+                console.error('Failed to map endpoint ids:', error);
+            }
+        }
         for (const [name, status] of Object.entries(results)) {
+            const endpointID = nameToID[name];
+            if (!endpointID) {
+                continue;
+            }
             if (status === 'ok') {
-                saveEndpointTestStatus(name, true);
+                saveEndpointTestStatus(endpointID, true);
             } else if (status === 'invalid_key') {
-                saveEndpointTestStatus(name, false);
+                saveEndpointTestStatus(endpointID, false);
             }
             // 'unknown' 保持未设置状态，显示 ⚠️
         }
@@ -523,14 +546,15 @@ export async function checkAllEndpointsOnStartup() {
 
 // 渲染简洁视图
 function renderCompactView(sortedEndpoints, container, currentEndpointName, clientType) {
-    sortedEndpoints.forEach(({ endpoint: ep, originalIndex: index, stats }) => {
+    sortedEndpoints.forEach(({ endpoint: ep, stats }) => {
         const enabled = ep.enabled !== undefined ? ep.enabled : true;
         const transformer = ep.transformer || 'claude';
         const model = ep.model || '';
+        const endpointID = ep.id || 0;
         const isCurrentEndpoint = ep.name === currentEndpointName;
 
         // 获取测试状态
-        const testStatus = getEndpointTestStatus(ep.name);
+        const testStatus = endpointID ? getEndpointTestStatus(endpointID) : undefined;
         let testStatusIcon = '⚠️';
         let testStatusTip = t('endpoints.testTipUnknown');
         if (testStatus === true) {
@@ -545,7 +569,7 @@ function renderCompactView(sortedEndpoints, container, currentEndpointName, clie
         item.className = 'endpoint-item-compact';
         item.draggable = true;
         item.dataset.name = ep.name;
-        item.dataset.index = index;
+        item.dataset.id = endpointID;
 
         // 截断 URL 显示
         const displayUrl = ep.apiUrl.length > 40 ? ep.apiUrl.substring(0, 40) + '...' : ep.apiUrl;
@@ -574,22 +598,22 @@ function renderCompactView(sortedEndpoints, container, currentEndpointName, clie
             <span class="compact-stats" title="${statsTooltip}">📊 ${stats.requests} | 🎯 ${formatTokens(stats.inputTokens + stats.outputTokens)}</span>
             <div class="compact-actions">
                 <label class="toggle-switch">
-                    <input type="checkbox" data-index="${index}" ${enabled ? 'checked' : ''}>
+                    <input type="checkbox" data-id="${endpointID}" ${enabled ? 'checked' : ''}>
                     <span class="toggle-slider"></span>
                 </label>
                 <div class="compact-more-dropdown">
                     <button class="compact-btn" data-action="more" title="${t('endpoints.moreActions')}">⋯</button>
                     <div class="compact-more-menu">
-                        <button data-action="test" data-index="${index}">🧪 ${t('endpoints.test')}</button>
-                        <button data-action="edit" data-index="${index}">✏️ ${t('endpoints.edit')}</button>
-                        <button data-action="delete" data-index="${index}" class="danger">🗑️ ${t('endpoints.delete')}</button>
+                        <button data-action="test" data-id="${endpointID}">🧪 ${t('endpoints.test')}</button>
+                        <button data-action="edit" data-id="${endpointID}">✏️ ${t('endpoints.edit')}</button>
+                        <button data-action="delete" data-id="${endpointID}" class="danger">🗑️ ${t('endpoints.delete')}</button>
                     </div>
                 </div>
             </div>
         `;
 
         // 绑定事件
-        bindCompactItemEvents(item, index, enabled, clientType);
+        bindCompactItemEvents(item, endpointID, enabled, clientType);
 
         // 设置拖拽
         setupCompactDragAndDrop(item, container);
@@ -603,7 +627,7 @@ function renderCompactView(sortedEndpoints, container, currentEndpointName, clie
 }
 
 // 绑定简洁视图项目事件
-function bindCompactItemEvents(item, index, enabled, clientType) {
+function bindCompactItemEvents(item, endpointID, enabled, clientType) {
     const toggleSwitch = item.querySelector('input[type="checkbox"]');
     const switchBtn = item.querySelector('[data-action="switch"]');
     const moreBtn = item.querySelector('[data-action="more"]');
@@ -613,7 +637,7 @@ function bindCompactItemEvents(item, index, enabled, clientType) {
     const deleteBtn = item.querySelector('[data-action="delete"]');
 
     // 如果当前正在测试这个端点，显示加载状态
-    if (currentTestIndex === index) {
+    if (currentTestID !== 0 && currentTestID === endpointID) {
         moreBtn.innerHTML = '⏳';
         moreBtn.disabled = true;
         currentTestButton = testBtn;
@@ -621,10 +645,10 @@ function bindCompactItemEvents(item, index, enabled, clientType) {
 
     // 启用/禁用开关
     toggleSwitch.addEventListener('change', async (e) => {
-        const idx = parseInt(e.target.getAttribute('data-index'));
+        const id = parseInt(e.target.getAttribute('data-id'));
         const newEnabled = e.target.checked;
         try {
-            await toggleEndpoint(idx, newEnabled);
+            await toggleEndpoint(id, newEnabled);
             window.loadConfig();
         } catch (error) {
             console.error('Failed to toggle endpoint:', error);
@@ -667,22 +691,22 @@ function bindCompactItemEvents(item, index, enabled, clientType) {
     // 测试按钮
     testBtn.addEventListener('click', () => {
         closeAllDropdowns();
-        const idx = parseInt(testBtn.getAttribute('data-index'));
-        window.testEndpoint(idx, testBtn);
+        const id = parseInt(testBtn.getAttribute('data-id'));
+        window.testEndpoint(id, testBtn);
     });
 
     // 编辑按钮
     editBtn.addEventListener('click', () => {
         closeAllDropdowns();
-        const idx = parseInt(editBtn.getAttribute('data-index'));
-        window.editEndpoint(idx);
+        const id = parseInt(editBtn.getAttribute('data-id'));
+        window.editEndpoint(id);
     });
 
     // 删除按钮
     deleteBtn.addEventListener('click', () => {
         closeAllDropdowns();
-        const idx = parseInt(deleteBtn.getAttribute('data-index'));
-        window.deleteEndpoint(idx);
+        const id = parseInt(deleteBtn.getAttribute('data-id'));
+        window.deleteEndpoint(id);
     });
 }
 

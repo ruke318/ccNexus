@@ -53,6 +53,16 @@ func NewEndpointService(cfg *config.Config, p *proxy.Proxy, s *storage.SQLiteSto
 	}
 }
 
+func (e *EndpointService) findEndpointIndexByID(endpointID int64) (int, error) {
+	endpoints := e.config.GetEndpoints()
+	for i, ep := range endpoints {
+		if ep.ID == endpointID {
+			return i, nil
+		}
+	}
+	return -1, fmt.Errorf("endpoint not found: %d", endpointID)
+}
+
 // normalizeAPIUrl ensures the API URL has the correct format
 func normalizeAPIUrl(apiUrl string) string {
 	return strings.TrimSuffix(apiUrl, "/")
@@ -117,12 +127,12 @@ func (e *EndpointService) AddEndpoint(name, apiUrl, apiKey, transformer, model, 
 	return nil
 }
 
-// RemoveEndpoint removes an endpoint by index
-func (e *EndpointService) RemoveEndpoint(index int) error {
+// RemoveEndpoint removes an endpoint by id
+func (e *EndpointService) RemoveEndpoint(endpointID int64) error {
 	endpoints := e.config.GetEndpoints()
-
-	if index < 0 || index >= len(endpoints) {
-		return fmt.Errorf("invalid endpoint index: %d", index)
+	index, err := e.findEndpointIndexByID(endpointID)
+	if err != nil {
+		return err
 	}
 
 	removedName := endpoints[index].Name
@@ -150,12 +160,12 @@ func (e *EndpointService) RemoveEndpoint(index int) error {
 	return nil
 }
 
-// UpdateEndpoint updates an endpoint by index
-func (e *EndpointService) UpdateEndpoint(index int, name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType string) error {
+// UpdateEndpoint updates an endpoint by id
+func (e *EndpointService) UpdateEndpoint(endpointID int64, name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType string) error {
 	endpoints := e.config.GetEndpoints()
-
-	if index < 0 || index >= len(endpoints) {
-		return fmt.Errorf("invalid endpoint index: %d", index)
+	index, err := e.findEndpointIndexByID(endpointID)
+	if err != nil {
+		return err
 	}
 
 	oldName := endpoints[index].Name
@@ -183,6 +193,7 @@ func (e *EndpointService) UpdateEndpoint(index int, name, apiUrl, apiKey, transf
 	apiUrl = normalizeAPIUrl(apiUrl)
 
 	endpoints[index] = config.Endpoint{
+		ID:          endpoints[index].ID,
 		Name:        name,
 		APIUrl:      apiUrl,
 		APIKey:      apiKey,
@@ -229,11 +240,11 @@ func (e *EndpointService) UpdateEndpoint(index int, name, apiUrl, apiKey, transf
 }
 
 // ToggleEndpoint toggles the enabled state of an endpoint
-func (e *EndpointService) ToggleEndpoint(index int, enabled bool) error {
+func (e *EndpointService) ToggleEndpoint(endpointID int64, enabled bool) error {
 	endpoints := e.config.GetEndpoints()
-
-	if index < 0 || index >= len(endpoints) {
-		return fmt.Errorf("invalid endpoint index: %d", index)
+	index, err := e.findEndpointIndexByID(endpointID)
+	if err != nil {
+		return err
 	}
 
 	endpointName := endpoints[index].Name
@@ -351,13 +362,13 @@ func (e *EndpointService) SwitchToEndpoint(endpointName, clientType string) erro
 }
 
 // TestEndpoint tests an endpoint by sending a simple request
-func (e *EndpointService) TestEndpoint(index int) string {
+func (e *EndpointService) TestEndpoint(endpointID int64) string {
 	endpoints := e.config.GetEndpoints()
-
-	if index < 0 || index >= len(endpoints) {
+	index, err := e.findEndpointIndexByID(endpointID)
+	if err != nil {
 		result := map[string]interface{}{
 			"success": false,
-			"message": fmt.Sprintf("Invalid endpoint index: %d", index),
+			"message": err.Error(),
 		}
 		data, _ := json.Marshal(result)
 		return string(data)
@@ -367,7 +378,6 @@ func (e *EndpointService) TestEndpoint(index int) string {
 	logger.Info("Testing endpoint: %s (%s)", endpoint.Name, endpoint.APIUrl)
 
 	var requestBody []byte
-	var err error
 	var apiPath string
 
 	transformer := endpoint.Transformer
@@ -581,11 +591,11 @@ func (e *EndpointService) TestEndpoint(index int) string {
 // will be added in the next part due to size constraints
 
 // TestEndpointLight tests endpoint availability with minimal token consumption
-func (e *EndpointService) TestEndpointLight(index int) string {
+func (e *EndpointService) TestEndpointLight(endpointID int64) string {
 	endpoints := e.config.GetEndpoints()
-
-	if index < 0 || index >= len(endpoints) {
-		return e.testResult(false, "invalid_index", "models", fmt.Sprintf("Invalid endpoint index: %d", index))
+	index, err := e.findEndpointIndexByID(endpointID)
+	if err != nil {
+		return e.testResult(false, "invalid_id", "models", err.Error())
 	}
 
 	endpoint := endpoints[index]

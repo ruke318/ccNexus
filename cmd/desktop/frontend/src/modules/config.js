@@ -24,8 +24,7 @@ export async function loadConfig() {
         const activeCount = config.endpoints.filter(ep => ep.enabled !== false).length;
         document.getElementById('activeEndpoints').textContent = activeCount;
 
-        config.endpoints = config.endpoints.map((ep, index) => ({ ...ep, _index: index }));
-
+        window.latestConfig = config;
         return config;
     } catch (error) {
         console.error('Failed to load config:', error);
@@ -41,25 +40,25 @@ export async function addEndpoint(name, url, key, transformer, model, remark, pr
     await window.go.main.App.AddEndpoint(name, url, key, transformer, model, remark || '', proxyUrl || '', clientType || '');
 }
 
-export async function updateEndpoint(index, name, url, key, transformer, model, remark, proxyUrl, clientType) {
-    await window.go.main.App.UpdateEndpoint(index, name, url, key, transformer, model, remark || '', proxyUrl || '', clientType || '');
+export async function updateEndpoint(id, name, url, key, transformer, model, remark, proxyUrl, clientType) {
+    await window.go.main.App.UpdateEndpoint(id, name, url, key, transformer, model, remark || '', proxyUrl || '', clientType || '');
 }
 
-export async function removeEndpoint(index) {
-    await window.go.main.App.RemoveEndpoint(index);
+export async function removeEndpoint(id) {
+    await window.go.main.App.RemoveEndpoint(id);
 }
 
-export async function toggleEndpoint(index, enabled) {
-    await window.go.main.App.ToggleEndpoint(index, enabled);
+export async function toggleEndpoint(id, enabled) {
+    await window.go.main.App.ToggleEndpoint(id, enabled);
 }
 
-export async function testEndpoint(index) {
-    const resultStr = await window.go.main.App.TestEndpoint(index);
+export async function testEndpoint(id) {
+    const resultStr = await window.go.main.App.TestEndpoint(id);
     return JSON.parse(resultStr);
 }
 
-export async function testEndpointLight(index) {
-    const resultStr = await window.go.main.App.TestEndpointLight(index);
+export async function testEndpointLight(id) {
+    const resultStr = await window.go.main.App.TestEndpointLight(id);
     return JSON.parse(resultStr);
 }
 

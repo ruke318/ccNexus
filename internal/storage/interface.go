@@ -42,7 +42,7 @@ type Storage interface {
 	GetEndpoints() ([]Endpoint, error)
 	SaveEndpoint(ep *Endpoint) error
 	UpdateEndpoint(ep *Endpoint) error
-	DeleteEndpoint(name string) error
+	DeleteEndpoint(id int64) error
 
 	// Stats
 	RecordDailyStat(stat *DailyStat) error

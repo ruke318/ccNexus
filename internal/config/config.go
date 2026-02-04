@@ -10,6 +10,7 @@ import (
 
 // Endpoint represents a single API endpoint configuration
 type Endpoint struct {
+	ID          int64  `json:"id,omitempty"`
 	Name        string `json:"name"`
 	APIUrl      string `json:"apiUrl"`
 	APIKey      string `json:"apiKey"`
@@ -452,13 +453,14 @@ type StorageAdapter interface {
 	GetEndpoints() ([]StorageEndpoint, error)
 	SaveEndpoint(ep *StorageEndpoint) error
 	UpdateEndpoint(ep *StorageEndpoint) error
-	DeleteEndpoint(name string) error
+	DeleteEndpoint(id int64) error
 	GetConfig(key string) (string, error)
 	SetConfig(key, value string) error
 }
 
 // StorageEndpoint represents an endpoint in storage
 type StorageEndpoint struct {
+	ID          int64
 	Name        string
 	APIUrl      string
 	APIKey      string
@@ -495,6 +497,7 @@ func LoadFromStorage(storage StorageAdapter) (*Config, error) {
 
 	for _, ep := range endpoints {
 		endpoint := Endpoint{
+			ID:          ep.ID,
 			Name:        ep.Name,
 			APIUrl:      ep.APIUrl,
 			APIKey:      ep.APIKey,
@@ -715,8 +718,8 @@ func LoadFromStorage(storage StorageAdapter) (*Config, error) {
 
 // SaveToStorage saves configuration to SQLite storage
 func (c *Config) SaveToStorage(storage StorageAdapter) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	// Get existing endpoints from storage
 	existingEndpoints, err := storage.GetEndpoints()
@@ -724,9 +727,15 @@ func (c *Config) SaveToStorage(storage StorageAdapter) error {
 		return fmt.Errorf("failed to get existing endpoints: %w", err)
 	}
 
-	existingNames := make(map[string]bool)
+	existingIDs := make(map[int64]bool)
+	existingNameToID := make(map[string]int64)
 	for _, ep := range existingEndpoints {
-		existingNames[ep.Name] = true
+		if ep.ID > 0 {
+			existingIDs[ep.ID] = true
+		}
+		if ep.Name != "" && ep.ID > 0 {
+			existingNameToID[ep.Name] = ep.ID
+		}
 	}
 
 	// Save/update endpoints
@@ -736,6 +745,7 @@ func (c *Config) SaveToStorage(storage StorageAdapter) error {
 			clientType = InferClientType(ep.Transformer)
 		}
 		endpoint := &StorageEndpoint{
+			ID:          ep.ID,
 			Name:        ep.Name,
 			APIUrl:      ep.APIUrl,
 			APIKey:      ep.APIKey,
@@ -748,7 +758,13 @@ func (c *Config) SaveToStorage(storage StorageAdapter) error {
 			SortOrder:   i, // Use array index as sort order
 		}
 
-		if existingNames[ep.Name] {
+		if endpoint.ID == 0 {
+			if id, ok := existingNameToID[ep.Name]; ok {
+				endpoint.ID = id
+			}
+		}
+
+		if endpoint.ID != 0 && existingIDs[endpoint.ID] {
 			if err := storage.UpdateEndpoint(endpoint); err != nil {
 				return fmt.Errorf("failed to update endpoint %s: %w", ep.Name, err)
 			}
@@ -757,13 +773,18 @@ func (c *Config) SaveToStorage(storage StorageAdapter) error {
 				return fmt.Errorf("failed to save endpoint %s: %w", ep.Name, err)
 			}
 		}
-		delete(existingNames, ep.Name)
+		if endpoint.ID != 0 && c.Endpoints[i].ID != endpoint.ID {
+			c.Endpoints[i].ID = endpoint.ID
+		}
+		if endpoint.ID != 0 {
+			delete(existingIDs, endpoint.ID)
+		}
 	}
 
 	// Delete endpoints that no longer exist
-	for name := range existingNames {
-		if err := storage.DeleteEndpoint(name); err != nil {
-			return fmt.Errorf("failed to delete endpoint %s: %w", name, err)
+	for id := range existingIDs {
+		if err := storage.DeleteEndpoint(id); err != nil {
+			return fmt.Errorf("failed to delete endpoint %d: %w", id, err)
 		}
 	}
 

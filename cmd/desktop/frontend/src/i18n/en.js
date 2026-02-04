@@ -90,6 +90,7 @@ export default {
         requiredFields: 'Please fill in all required fields',
         modelRequired: 'Model field is required for {transformer} transformer',
         saveFailed: 'Failed to save: {error}',
+        endpointNotFound: 'Endpoint not found. Please refresh and try again.',
         confirmDelete: 'Are you sure you want to delete endpoint "{name}"?',
         deleteFailed: 'Failed to delete: {error}',
         fetchModels: 'Fetch Models',

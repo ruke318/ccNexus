@@ -3,7 +3,7 @@ import { escapeHtml } from '../utils/format.js';
 import { addEndpoint, updateEndpoint, removeEndpoint, testEndpoint, testEndpointLight, updatePorts } from './config.js';
 import { setTestState, clearTestState, saveEndpointTestStatus } from './endpoints.js';
 
-let currentEditIndex = -1;
+let currentEditID = 0;
 let currentClientType = 'claude';
 
 // Show error toast
@@ -97,7 +97,7 @@ export function togglePasswordVisibility() {
 
 // Endpoint Modal
 export function showAddEndpointModal(clientType = 'claude') {
-    currentEditIndex = -1;
+    currentEditID = 0;
     currentClientType = clientType;
     document.getElementById('modalTitle').textContent = '➕ ' + t('modal.addEndpoint');
     document.getElementById('endpointName').value = '';
@@ -113,11 +113,15 @@ export function showAddEndpointModal(clientType = 'claude') {
     document.getElementById('endpointModal').classList.add('active');
 }
 
-export async function editEndpoint(index) {
-    currentEditIndex = index;
+export async function editEndpoint(id) {
+    currentEditID = id;
     const configStr = await window.go.main.App.GetConfig();
     const config = JSON.parse(configStr);
-    const ep = config.endpoints[index];
+    const ep = config.endpoints.find(item => item.id === id);
+    if (!ep) {
+        showError(t('modal.endpointNotFound'));
+        return;
+    }
 
     document.getElementById('modalTitle').textContent = '✏️ ' + t('modal.editEndpoint');
     currentClientType = ep.clientType || 'claude';
@@ -157,8 +161,8 @@ export async function saveEndpoint() {
     // Check for duplicate endpoint name
     const configStr = await window.go.main.App.GetConfig();
     const config = JSON.parse(configStr);
-    const existingEndpoint = config.endpoints.find((ep, idx) =>
-        ep.name === name && idx !== currentEditIndex
+    const existingEndpoint = config.endpoints.find((ep) =>
+        ep.name === name && ep.id !== currentEditID
     );
 
     if (existingEndpoint) {
@@ -167,10 +171,10 @@ export async function saveEndpoint() {
     }
 
     try {
-        if (currentEditIndex === -1) {
+        if (currentEditID === 0) {
             await addEndpoint(name, url, key, transformer, model, remark, proxyUrl, currentClientType);
         } else {
-            await updateEndpoint(currentEditIndex, name, url, key, transformer, model, remark, proxyUrl, currentClientType);
+            await updateEndpoint(currentEditID, name, url, key, transformer, model, remark, proxyUrl, currentClientType);
         }
 
         closeModal();
@@ -180,18 +184,22 @@ export async function saveEndpoint() {
     }
 }
 
-export async function deleteEndpoint(index) {
+export async function deleteEndpoint(id) {
     try {
         const config = await window.go.main.App.GetConfig();
         const endpoints = JSON.parse(config).endpoints;
-        const endpointName = endpoints[index].name;
+        const endpoint = endpoints.find(item => item.id === id);
+        if (!endpoint) {
+            showError(t('modal.endpointNotFound'));
+            return;
+        }
 
-        const confirmed = await showConfirm(t('modal.confirmDelete').replace('{name}', endpointName));
+        const confirmed = await showConfirm(t('modal.confirmDelete').replace('{name}', endpoint.name));
         if (!confirmed) {
             return;
         }
 
-        await removeEndpoint(index);
+        await removeEndpoint(id);
         window.loadConfig();
     } catch (error) {
         console.error('Delete failed:', error);
@@ -509,13 +517,12 @@ function isTestNotSupported(statusCode, message) {
 }
 
 // Test Result Modal
-export async function testEndpointHandler(index, buttonElement) {
-    setTestState(buttonElement, index);
+export async function testEndpointHandler(id, buttonElement) {
+    setTestState(buttonElement, id);
 
     // 获取端点名称用于保存测试状态（兼容详情视图和简洁视图）
     const endpointItem = buttonElement.closest('.endpoint-item') || buttonElement.closest('.endpoint-item-compact');
-    const endpointName = endpointItem ? endpointItem.dataset.name : null;
-
+    const endpointID = id;
     // 简洁视图：同时更新 moreBtn
     const moreBtn = endpointItem ? endpointItem.querySelector('[data-action="more"]') : null;
     if (moreBtn) {
@@ -528,7 +535,7 @@ export async function testEndpointHandler(index, buttonElement) {
         buttonElement.innerHTML = '⏳';
 
         // 使用轻量级测试（优先零消耗方法）
-        const result = await testEndpointLight(index);
+        const result = await testEndpointLight(id);
 
         const resultContent = document.getElementById('testResultContent');
         const resultTitle = document.getElementById('testResultTitle');
@@ -542,15 +549,15 @@ export async function testEndpointHandler(index, buttonElement) {
                 <div style="padding: 15px; background: #f8f9fa; border-radius: 5px; font-family: monospace; white-space: pre-line; word-break: break-all;">${escapeHtml(result.message)} (${result.method})</div>
             `;
             // 保存测试成功状态
-            if (endpointName) {
-                saveEndpointTestStatus(endpointName, true);
+            if (endpointID) {
+                saveEndpointTestStatus(endpointID, true);
             }
         } else if (result.status === 'unknown') {
             // 无法确定状态（如三方站限制测试）
             showNotification(t('test.notSupportedMessage'), 'warning');
             // 保存为未知状态
-            if (endpointName) {
-                saveEndpointTestStatus(endpointName, 'unknown');
+            if (endpointID) {
+                saveEndpointTestStatus(endpointID, 'unknown');
             }
             // 清除测试状态，恢复按钮
             clearTestState();
@@ -568,8 +575,8 @@ export async function testEndpointHandler(index, buttonElement) {
                 <div style="padding: 15px; background: #f8f9fa; border-radius: 5px; font-family: monospace; white-space: pre-line; word-break: break-all;"><strong>Error:</strong><br>${escapeHtml(result.message)}</div>
             `;
             // 保存测试失败状态
-            if (endpointName) {
-                saveEndpointTestStatus(endpointName, false);
+            if (endpointID) {
+                saveEndpointTestStatus(endpointID, false);
             }
         }
 
@@ -594,8 +601,8 @@ export async function testEndpointHandler(index, buttonElement) {
         `;
 
         // 保存测试失败状态（异常情况）
-        if (endpointName) {
-            saveEndpointTestStatus(endpointName, false);
+        if (endpointID) {
+            saveEndpointTestStatus(endpointID, false);
         }
 
         document.getElementById('testResultModal').classList.add('active');

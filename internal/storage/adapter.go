@@ -22,6 +22,7 @@ func (a *ConfigStorageAdapter) GetEndpoints() ([]config.StorageEndpoint, error) 
 	result := make([]config.StorageEndpoint, len(endpoints))
 	for i, ep := range endpoints {
 		result[i] = config.StorageEndpoint{
+			ID:          ep.ID,
 			Name:        ep.Name,
 			APIUrl:      ep.APIUrl,
 			APIKey:      ep.APIKey,
@@ -40,6 +41,7 @@ func (a *ConfigStorageAdapter) GetEndpoints() ([]config.StorageEndpoint, error) 
 // SaveEndpoint saves an endpoint
 func (a *ConfigStorageAdapter) SaveEndpoint(ep *config.StorageEndpoint) error {
 	endpoint := &Endpoint{
+		ID:          ep.ID,
 		Name:        ep.Name,
 		APIUrl:      ep.APIUrl,
 		APIKey:      ep.APIKey,
@@ -51,12 +53,17 @@ func (a *ConfigStorageAdapter) SaveEndpoint(ep *config.StorageEndpoint) error {
 		ProxyURL:    ep.ProxyURL,
 		SortOrder:   ep.SortOrder,
 	}
-	return a.storage.SaveEndpoint(endpoint)
+	if err := a.storage.SaveEndpoint(endpoint); err != nil {
+		return err
+	}
+	ep.ID = endpoint.ID
+	return nil
 }
 
 // UpdateEndpoint updates an endpoint
 func (a *ConfigStorageAdapter) UpdateEndpoint(ep *config.StorageEndpoint) error {
 	endpoint := &Endpoint{
+		ID:          ep.ID,
 		Name:        ep.Name,
 		APIUrl:      ep.APIUrl,
 		APIKey:      ep.APIKey,
@@ -68,12 +75,16 @@ func (a *ConfigStorageAdapter) UpdateEndpoint(ep *config.StorageEndpoint) error 
 		ProxyURL:    ep.ProxyURL,
 		SortOrder:   ep.SortOrder,
 	}
-	return a.storage.UpdateEndpoint(endpoint)
+	if err := a.storage.UpdateEndpoint(endpoint); err != nil {
+		return err
+	}
+	ep.ID = endpoint.ID
+	return nil
 }
 
 // DeleteEndpoint deletes an endpoint
-func (a *ConfigStorageAdapter) DeleteEndpoint(name string) error {
-	return a.storage.DeleteEndpoint(name)
+func (a *ConfigStorageAdapter) DeleteEndpoint(id int64) error {
+	return a.storage.DeleteEndpoint(id)
 }
 
 // GetConfig gets a config value

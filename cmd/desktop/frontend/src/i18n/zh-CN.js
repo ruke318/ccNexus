@@ -90,6 +90,7 @@ export default {
         requiredFields: '请填写所有必填项',
         modelRequired: '使用 {transformer} 转换器时，模型字段为必填项',
         saveFailed: '保存失败：{error}',
+        endpointNotFound: '端点不存在，请刷新后重试。',
         confirmDelete: '确认删除端点 "{name}" 吗？',
         deleteFailed: '删除失败：{error}',
         fetchModels: '获取模型列表',

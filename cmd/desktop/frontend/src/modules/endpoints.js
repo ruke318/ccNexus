@@ -1,5 +1,5 @@
 import { t } from '../i18n/index.js';
-import { formatTokens, maskApiKey } from '../utils/format.js';
+import { formatTokens, maskApiKey, escapeHtml } from '../utils/format.js';
 import { getEndpointStats } from './stats.js';
 import { toggleEndpoint, testAllEndpointsZeroCost } from './config.js';
 
@@ -125,6 +125,31 @@ let currentTestButtonOriginalText = '';
 let currentTestID = 0;
 let endpointPanelExpanded = true;
 
+function resolvePoolLabel(poolId) {
+    return window.codexPoolMap?.[String(poolId)] || `${t('codexPool.pool')} #${poolId}`;
+}
+
+function renderEndpointAuthLine(endpoint) {
+    const authType = endpoint.authType || 'apikey';
+    if (authType === 'codex_pool') {
+        const poolLabel = endpoint.codexPoolId ? resolvePoolLabel(endpoint.codexPoolId) : '-';
+        return `
+            <p style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">🪪 ${t('modal.authTypeCodexPool')}: ${escapeHtml(poolLabel)}</span>
+            </p>
+        `;
+    }
+
+    return `
+        <p style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+            <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">🔑 ${maskApiKey(endpoint.apiKey || '')}</span>
+            <button class="copy-btn" data-copy="${endpoint.apiKey || ''}" aria-label="${t('endpoints.copy')}" title="${t('endpoints.copy')}">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em"><path d="M7 4c0-1.1.9-2 2-2h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-1V8c0-2-1-3-3-3H7V4Z" fill="currentColor"></path><path d="M5 7a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h10a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2H5Z" fill="currentColor"></path></svg>
+            </button>
+        </p>
+    `;
+}
+
 function copyToClipboard(text, button) {
     navigator.clipboard.writeText(text).then(() => {
         const originalHTML = button.innerHTML;
@@ -215,6 +240,7 @@ export async function renderEndpoints(endpoints, clientType, containerId) {
         const model = ep.model || '';
         const endpointID = ep.id || 0;
         const isCurrentEndpoint = ep.name === currentEndpointName;
+        const authLine = renderEndpointAuthLine(ep);
 
         const item = document.createElement('div');
         item.className = 'endpoint-item';
@@ -243,7 +269,7 @@ export async function renderEndpoints(endpoints, clientType, containerId) {
                     ${enabled && !isCurrentEndpoint ? '<button class="btn btn-switch" data-action="switch" data-name="' + ep.name + '">' + t('endpoints.switchTo') + '</button>' : ''}
                 </h3>
                 <p style="display: flex; align-items: center; gap: 8px; min-width: 0;"><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">🌐 ${ep.apiUrl}</span> <button class="copy-btn" data-copy="${ep.apiUrl}" aria-label="${t('endpoints.copy')}" title="${t('endpoints.copy')}"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em"><path d="M7 4c0-1.1.9-2 2-2h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-1V8c0-2-1-3-3-3H7V4Z" fill="currentColor"></path><path d="M5 7a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h10a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2H5Z" fill="currentColor"></path></svg></button></p>
-                <p style="display: flex; align-items: center; gap: 8px; min-width: 0;"><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">🔑 ${maskApiKey(ep.apiKey)}</span> <button class="copy-btn" data-copy="${ep.apiKey}" aria-label="${t('endpoints.copy')}" title="${t('endpoints.copy')}"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em"><path d="M7 4c0-1.1.9-2 2-2h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-1V8c0-2-1-3-3-3H7V4Z" fill="currentColor"></path><path d="M5 7a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h10a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2H5Z" fill="currentColor"></path></svg></button></p>
+                ${authLine}
                 <p style="color: #666; font-size: 14px; margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">🔄 ${t('endpoints.transformer')}: ${transformer}${model ? ` (${model})` : ''}</p>
                 <p style="color: #666; font-size: 14px; margin-top: 3px;">📊 ${t('endpoints.requests')}: ${stats.requests} | ${t('endpoints.errors')}: ${stats.errors}</p>
                 <p style="color: #666; font-size: 14px; margin-top: 3px;">🎯 ${t('endpoints.tokens')}: ${formatTokens(totalTokens)} (${t('statistics.in')}: ${formatTokens(stats.inputTokens)}, ${t('statistics.out')}: ${formatTokens(stats.outputTokens)})</p>
@@ -573,10 +599,14 @@ function renderCompactView(sortedEndpoints, container, currentEndpointName, clie
 
         // 截断 URL 显示
         const displayUrl = ep.apiUrl.length > 40 ? ep.apiUrl.substring(0, 40) + '...' : ep.apiUrl;
+        const authType = ep.authType || 'apikey';
+        const authLabel = authType === 'codex_pool'
+            ? `${t('modal.authTypeCodexPool')}: ${resolvePoolLabel(ep.codexPoolId)}`
+            : `${t('modal.apiKey')}: ${maskApiKey(ep.apiKey || '')}`;
 
         // 构建统计详情提示
         const totalTokens = stats.inputTokens + stats.outputTokens;
-        let statsTooltip = `${t('endpoints.requests')}: ${stats.requests} | ${t('endpoints.errors')}: ${stats.errors}\n${t('statistics.in')}: ${formatTokens(stats.inputTokens)} | ${t('statistics.out')}: ${formatTokens(stats.outputTokens)}`;
+        let statsTooltip = `${t('endpoints.requests')}: ${stats.requests} | ${t('endpoints.errors')}: ${stats.errors}\n${t('statistics.in')}: ${formatTokens(stats.inputTokens)} | ${t('statistics.out')}: ${formatTokens(stats.outputTokens)}\n${authLabel}`;
         if (model) {
             statsTooltip += `\n${t('modal.model')}: ${model}`;
         }

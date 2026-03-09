@@ -1,10 +1,14 @@
 import { t } from '../i18n/index.js';
 import { escapeHtml } from '../utils/format.js';
-import { addEndpoint, updateEndpoint, removeEndpoint, testEndpoint, testEndpointLight, updatePorts } from './config.js';
+import { addEndpointAdvanced, updateEndpointAdvanced, removeEndpoint, testEndpoint, testEndpointLight, updatePorts } from './config.js';
 import { setTestState, clearTestState, saveEndpointTestStatus } from './endpoints.js';
 
 let currentEditID = 0;
 let currentClientType = 'claude';
+let lastManualEndpointUrl = '';
+const DEFAULT_ENDPOINT_AUTH_TYPE = 'apikey';
+const CODEX_POOL_BACKEND_URL = 'https://chatgpt.com/backend-api/codex';
+const CODEX_POOL_DEFAULT_TRANSFORMER = 'openai2';
 
 // Show error toast
 function showError(message) {
@@ -99,10 +103,13 @@ export function togglePasswordVisibility() {
 export function showAddEndpointModal(clientType = 'claude') {
     currentEditID = 0;
     currentClientType = clientType;
+    lastManualEndpointUrl = '';
     document.getElementById('modalTitle').textContent = '➕ ' + t('modal.addEndpoint');
     document.getElementById('endpointName').value = '';
     document.getElementById('endpointUrl').value = '';
     document.getElementById('endpointKey').value = '';
+    document.getElementById('endpointAuthType').value = DEFAULT_ENDPOINT_AUTH_TYPE;
+    document.getElementById('endpointCodexPoolId').value = '';
     document.getElementById('endpointKey').type = 'password';
     document.getElementById('eyeIcon').innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>';
     document.getElementById('endpointTransformer').value = 'claude';
@@ -110,6 +117,8 @@ export function showAddEndpointModal(clientType = 'claude') {
     document.getElementById('endpointRemark').value = '';
     document.getElementById('endpointProxyUrl').value = '';
     handleTransformerChange();
+    loadEndpointCodexPools(0);
+    handleEndpointAuthTypeChange();
     document.getElementById('endpointModal').classList.add('active');
 }
 
@@ -125,9 +134,12 @@ export async function editEndpoint(id) {
 
     document.getElementById('modalTitle').textContent = '✏️ ' + t('modal.editEndpoint');
     currentClientType = ep.clientType || 'claude';
+    lastManualEndpointUrl = ep.authType === 'codex_pool' ? '' : (ep.apiUrl || '');
     document.getElementById('endpointName').value = ep.name;
     document.getElementById('endpointUrl').value = ep.apiUrl;
     document.getElementById('endpointKey').value = ep.apiKey;
+    document.getElementById('endpointAuthType').value = ep.authType || DEFAULT_ENDPOINT_AUTH_TYPE;
+    document.getElementById('endpointCodexPoolId').value = ep.codexPoolId || '';
     document.getElementById('endpointKey').type = 'password';
     document.getElementById('eyeIcon').innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>';
     document.getElementById('endpointTransformer').value = ep.transformer || 'claude';
@@ -136,6 +148,8 @@ export async function editEndpoint(id) {
     document.getElementById('endpointProxyUrl').value = ep.proxyUrl || '';
 
     handleTransformerChange();
+    await loadEndpointCodexPools(ep.codexPoolId || 0);
+    await handleEndpointAuthTypeChange();
     document.getElementById('endpointModal').classList.add('active');
 }
 
@@ -143,13 +157,28 @@ export async function saveEndpoint() {
     const name = document.getElementById('endpointName').value.trim();
     const url = document.getElementById('endpointUrl').value.trim();
     const key = document.getElementById('endpointKey').value.trim();
+    const authType = document.getElementById('endpointAuthType').value || DEFAULT_ENDPOINT_AUTH_TYPE;
+    const codexPoolId = parseInt(document.getElementById('endpointCodexPoolId').value, 10) || 0;
     const transformer = document.getElementById('endpointTransformer').value;
     const model = document.getElementById('endpointModel').value.trim();
     const remark = document.getElementById('endpointRemark').value.trim();
     const proxyUrl = document.getElementById('endpointProxyUrl').value.trim();
 
-    if (!name || !url || !key) {
+    const usePool = authType === 'codex_pool';
+    const effectiveUrl = usePool ? CODEX_POOL_BACKEND_URL : url;
+
+    if (!name || !effectiveUrl) {
         showError(t('modal.requiredFields'));
+        return;
+    }
+
+    if (!usePool && !key) {
+        showError(t('modal.requiredFields'));
+        return;
+    }
+
+    if (usePool && codexPoolId <= 0) {
+        showError(t('modal.poolRequired'));
         return;
     }
 
@@ -171,10 +200,11 @@ export async function saveEndpoint() {
     }
 
     try {
+        const savedKey = usePool ? '' : key;
         if (currentEditID === 0) {
-            await addEndpoint(name, url, key, transformer, model, remark, proxyUrl, currentClientType);
+            await addEndpointAdvanced(name, effectiveUrl, savedKey, transformer, model, remark, proxyUrl, currentClientType, authType, codexPoolId);
         } else {
-            await updateEndpoint(currentEditID, name, url, key, transformer, model, remark, proxyUrl, currentClientType);
+            await updateEndpointAdvanced(currentEditID, name, effectiveUrl, savedKey, transformer, model, remark, proxyUrl, currentClientType, authType, codexPoolId);
         }
 
         closeModal();
@@ -239,13 +269,102 @@ export function handleTransformerChange() {
     }
 }
 
+async function loadEndpointCodexPools(selectedPoolId = 0) {
+    const select = document.getElementById('endpointCodexPoolId');
+    if (!select) {
+        return;
+    }
+
+    const currentValue = parseInt(select.value, 10) || selectedPoolId || 0;
+    select.innerHTML = `<option value="">${t('modal.selectCodexPool')}</option>`;
+
+    try {
+        const result = JSON.parse(await window.go.main.App.ListCodexPools());
+        if (!result.success) {
+            throw new Error(result.message || 'load codex pools failed');
+        }
+
+        const pools = Array.isArray(result.pools) ? result.pools : [];
+        pools.forEach((pool) => {
+            const option = document.createElement('option');
+            option.value = pool.id;
+            const suffix = pool.enabled ? '' : ` (${t('codexPool.disabled')})`;
+            option.textContent = `${pool.name}${suffix}`;
+            if (pool.id === currentValue) {
+                option.selected = true;
+            }
+            select.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Failed to load Codex pools for endpoint modal:', error);
+    }
+}
+
+export async function handleEndpointAuthTypeChange() {
+    const authType = document.getElementById('endpointAuthType')?.value || DEFAULT_ENDPOINT_AUTH_TYPE;
+    const apiKeyGroup = document.getElementById('endpointApiKeyGroup');
+    const poolGroup = document.getElementById('endpointCodexPoolGroup');
+    const fetchBtn = document.getElementById('fetchModelsBtn');
+    const fetchIcon = document.getElementById('fetchModelsIcon');
+    const transformerSelect = document.getElementById('endpointTransformer');
+    const urlInput = document.getElementById('endpointUrl');
+    const urlGroup = document.getElementById('endpointUrlGroup');
+
+    if (!apiKeyGroup || !poolGroup) {
+        return;
+    }
+
+    const usePool = authType === 'codex_pool';
+    apiKeyGroup.style.display = usePool ? 'none' : 'block';
+    poolGroup.style.display = usePool ? 'block' : 'none';
+    if (urlGroup) {
+        urlGroup.style.display = usePool ? 'none' : 'block';
+    }
+
+    if (fetchBtn) {
+        fetchBtn.disabled = false;
+        fetchBtn.title = t('modal.fetchModels');
+    }
+    if (fetchIcon) {
+        fetchIcon.textContent = t('modal.fetchModelsBtn');
+    }
+
+    if (usePool) {
+        if (urlInput && urlInput.value && urlInput.value !== CODEX_POOL_BACKEND_URL) {
+            lastManualEndpointUrl = urlInput.value;
+        }
+        if (transformerSelect) {
+            transformerSelect.value = CODEX_POOL_DEFAULT_TRANSFORMER;
+            transformerSelect.disabled = true;
+        }
+        if (urlInput) {
+            urlInput.value = CODEX_POOL_BACKEND_URL;
+        }
+        handleTransformerChange();
+        await loadEndpointCodexPools();
+    } else {
+        if (transformerSelect) {
+            transformerSelect.disabled = false;
+        }
+        if (urlInput && (!urlInput.value || urlInput.value === CODEX_POOL_BACKEND_URL)) {
+            urlInput.value = lastManualEndpointUrl;
+        }
+    }
+}
+
 // Store fetched models for filtering
 let fetchedModels = [];
 
 // Fetch models from API
 export async function fetchModels() {
-    const apiUrl = document.getElementById('endpointUrl').value.trim();
-    const apiKey = document.getElementById('endpointKey').value.trim();
+    const authType = document.getElementById('endpointAuthType')?.value || DEFAULT_ENDPOINT_AUTH_TYPE;
+    const codexPoolId = parseInt(document.getElementById('endpointCodexPoolId')?.value, 10) || 0;
+    const apiUrl = authType === 'codex_pool'
+        ? CODEX_POOL_BACKEND_URL
+        : document.getElementById('endpointUrl').value.trim();
+    const apiKey = authType === 'codex_pool'
+        ? ''
+        : document.getElementById('endpointKey').value.trim();
     const transformer = document.getElementById('endpointTransformer').value;
     const proxyUrl = document.getElementById('endpointProxyUrl').value.trim();
     const fetchBtn = document.getElementById('fetchModelsBtn');
@@ -253,12 +372,17 @@ export async function fetchModels() {
     const modelInput = document.getElementById('endpointModel');
     const dropdown = document.getElementById('modelDropdown');
 
+    if (authType === 'codex_pool' && codexPoolId <= 0) {
+        showNotification(t('modal.poolRequired'), 'warning');
+        return;
+    }
+
     // Validate inputs
-    if (!apiUrl) {
+    if (authType !== 'codex_pool' && !apiUrl) {
         showNotification(t('modal.fetchModelsNoUrl'), 'error');
         return;
     }
-    if (!apiKey) {
+    if (authType !== 'codex_pool' && !apiKey) {
         showNotification(t('modal.fetchModelsNoKey'), 'error');
         return;
     }
@@ -268,7 +392,7 @@ export async function fetchModels() {
     fetchIcon.textContent = '⏳';
 
     try {
-        const resultStr = await window.go.main.App.FetchModels(apiUrl, apiKey, transformer, proxyUrl);
+        const resultStr = await window.go.main.App.FetchModels(apiUrl, apiKey, transformer, proxyUrl, authType, codexPoolId);
         const result = JSON.parse(resultStr);
 
         if (result.success && result.models && result.models.length > 0) {

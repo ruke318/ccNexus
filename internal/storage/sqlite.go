@@ -75,6 +75,8 @@ func (s *SQLiteStorage) initSchema() error {
 		name TEXT UNIQUE NOT NULL,
 		api_url TEXT NOT NULL,
 		api_key TEXT NOT NULL,
+		auth_type TEXT DEFAULT 'apikey',
+		codex_pool_id INTEGER DEFAULT 0,
 		enabled BOOLEAN DEFAULT TRUE,
 		transformer TEXT DEFAULT 'claude',
 		model TEXT,
@@ -105,9 +107,46 @@ func (s *SQLiteStorage) initSchema() error {
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	CREATE TABLE IF NOT EXISTS codex_slots (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT UNIQUE NOT NULL,
+		state_dir TEXT NOT NULL,
+		account_id TEXT,
+		status TEXT DEFAULT 'unknown',
+		enabled BOOLEAN DEFAULT TRUE,
+		cooldown_until DATETIME,
+		last_checked_at DATETIME,
+		last_used_at DATETIME,
+		last_error TEXT,
+		remark TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS codex_pools (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT UNIQUE NOT NULL,
+		strategy TEXT DEFAULT 'rr',
+		enabled BOOLEAN DEFAULT TRUE,
+		cooldown_429_sec INTEGER DEFAULT 600,
+		cooldown_5xx_sec INTEGER DEFAULT 120,
+		auth_expired_policy TEXT DEFAULT 'skip',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS codex_pool_slots (
+		pool_id INTEGER NOT NULL,
+		slot_id INTEGER NOT NULL,
+		sort_order INTEGER DEFAULT 0,
+		PRIMARY KEY (pool_id, slot_id)
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_stats(date);
 	CREATE INDEX IF NOT EXISTS idx_daily_stats_endpoint ON daily_stats(endpoint_name);
 	CREATE INDEX IF NOT EXISTS idx_daily_stats_device ON daily_stats(device_id);
+	CREATE INDEX IF NOT EXISTS idx_codex_slots_status ON codex_slots(status);
+	CREATE INDEX IF NOT EXISTS idx_codex_pool_slots_pool ON codex_pool_slots(pool_id, sort_order);
 	`
 
 	if _, err := s.db.Exec(schema); err != nil {
@@ -122,6 +161,9 @@ func (s *SQLiteStorage) initSchema() error {
 		return err
 	}
 	if err := s.migrateProxyURL(); err != nil {
+		return err
+	}
+	if err := s.migrateEndpointAuthFields(); err != nil {
 		return err
 	}
 
@@ -183,11 +225,36 @@ func (s *SQLiteStorage) migrateClientType() error {
 	return nil
 }
 
+func (s *SQLiteStorage) migrateEndpointAuthFields() error {
+	migrations := []struct {
+		column     string
+		definition string
+	}{
+		{column: "auth_type", definition: "TEXT DEFAULT 'apikey'"},
+		{column: "codex_pool_id", definition: "INTEGER DEFAULT 0"},
+	}
+
+	for _, migration := range migrations {
+		var count int
+		err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('endpoints') WHERE name=?`, migration.column).Scan(&count)
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			if _, err := s.db.Exec(fmt.Sprintf(`ALTER TABLE endpoints ADD COLUMN %s %s`, migration.column, migration.definition)); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 func (s *SQLiteStorage) GetEndpoints() ([]Endpoint, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query(`SELECT id, name, api_url, api_key, enabled, transformer, model, remark, client_type, proxy_url, sort_order, created_at, updated_at FROM endpoints ORDER BY sort_order ASC`)
+	rows, err := s.db.Query(`SELECT id, name, api_url, api_key, auth_type, codex_pool_id, enabled, transformer, model, remark, client_type, proxy_url, sort_order, created_at, updated_at FROM endpoints ORDER BY sort_order ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -196,10 +263,18 @@ func (s *SQLiteStorage) GetEndpoints() ([]Endpoint, error) {
 	var endpoints []Endpoint
 	for rows.Next() {
 		var ep Endpoint
+		var authType sql.NullString
+		var codexPoolID sql.NullInt64
 		var clientType sql.NullString
 		var proxyURL sql.NullString
-		if err := rows.Scan(&ep.ID, &ep.Name, &ep.APIUrl, &ep.APIKey, &ep.Enabled, &ep.Transformer, &ep.Model, &ep.Remark, &clientType, &proxyURL, &ep.SortOrder, &ep.CreatedAt, &ep.UpdatedAt); err != nil {
+		if err := rows.Scan(&ep.ID, &ep.Name, &ep.APIUrl, &ep.APIKey, &authType, &codexPoolID, &ep.Enabled, &ep.Transformer, &ep.Model, &ep.Remark, &clientType, &proxyURL, &ep.SortOrder, &ep.CreatedAt, &ep.UpdatedAt); err != nil {
 			return nil, err
+		}
+		if authType.Valid {
+			ep.AuthType = authType.String
+		}
+		if codexPoolID.Valid {
+			ep.CodexPoolID = codexPoolID.Int64
 		}
 		if clientType.Valid {
 			ep.ClientType = clientType.String
@@ -215,6 +290,9 @@ func (s *SQLiteStorage) GetEndpoints() ([]Endpoint, error) {
 				ep.ClientType = "claude"
 			}
 		}
+		if ep.AuthType == "" {
+			ep.AuthType = "apikey"
+		}
 		endpoints = append(endpoints, ep)
 	}
 
@@ -225,8 +303,8 @@ func (s *SQLiteStorage) SaveEndpoint(ep *Endpoint) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	result, err := s.db.Exec(`INSERT INTO endpoints (name, api_url, api_key, enabled, transformer, model, remark, client_type, proxy_url, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ep.Name, ep.APIUrl, ep.APIKey, ep.Enabled, ep.Transformer, ep.Model, ep.Remark, ep.ClientType, ep.ProxyURL, ep.SortOrder)
+	result, err := s.db.Exec(`INSERT INTO endpoints (name, api_url, api_key, auth_type, codex_pool_id, enabled, transformer, model, remark, client_type, proxy_url, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ep.Name, ep.APIUrl, ep.APIKey, ep.AuthType, ep.CodexPoolID, ep.Enabled, ep.Transformer, ep.Model, ep.Remark, ep.ClientType, ep.ProxyURL, ep.SortOrder)
 	if err != nil {
 		return err
 	}
@@ -248,8 +326,8 @@ func (s *SQLiteStorage) UpdateEndpoint(ep *Endpoint) error {
 	if ep.ID == 0 {
 		return fmt.Errorf("missing endpoint id for update: %s", ep.Name)
 	}
-	_, err := s.db.Exec(`UPDATE endpoints SET name=?, api_url=?, api_key=?, enabled=?, transformer=?, model=?, remark=?, client_type=?, proxy_url=?, sort_order=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-		ep.Name, ep.APIUrl, ep.APIKey, ep.Enabled, ep.Transformer, ep.Model, ep.Remark, ep.ClientType, ep.ProxyURL, ep.SortOrder, ep.ID)
+	_, err := s.db.Exec(`UPDATE endpoints SET name=?, api_url=?, api_key=?, auth_type=?, codex_pool_id=?, enabled=?, transformer=?, model=?, remark=?, client_type=?, proxy_url=?, sort_order=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		ep.Name, ep.APIUrl, ep.APIKey, ep.AuthType, ep.CodexPoolID, ep.Enabled, ep.Transformer, ep.Model, ep.Remark, ep.ClientType, ep.ProxyURL, ep.SortOrder, ep.ID)
 	return err
 }
 
@@ -259,6 +337,270 @@ func (s *SQLiteStorage) DeleteEndpoint(id int64) error {
 
 	_, err := s.db.Exec(`DELETE FROM endpoints WHERE id=?`, id)
 	return err
+}
+
+func (s *SQLiteStorage) GetCodexSlots() ([]CodexSlot, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`SELECT id, name, state_dir, account_id, status, enabled, cooldown_until, last_checked_at, last_used_at, last_error, remark, created_at, updated_at FROM codex_slots ORDER BY name ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var slots []CodexSlot
+	for rows.Next() {
+		var slot CodexSlot
+		var accountID, status, lastError, remark sql.NullString
+		var cooldownUntil, lastCheckedAt, lastUsedAt sql.NullTime
+		if err := rows.Scan(&slot.ID, &slot.Name, &slot.StateDir, &accountID, &status, &slot.Enabled, &cooldownUntil, &lastCheckedAt, &lastUsedAt, &lastError, &remark, &slot.CreatedAt, &slot.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if accountID.Valid {
+			slot.AccountID = accountID.String
+		}
+		if status.Valid {
+			slot.Status = status.String
+		}
+		if cooldownUntil.Valid {
+			slot.CooldownUntil = cooldownUntil.Time
+		}
+		if lastCheckedAt.Valid {
+			slot.LastCheckedAt = lastCheckedAt.Time
+		}
+		if lastUsedAt.Valid {
+			slot.LastUsedAt = lastUsedAt.Time
+		}
+		if lastError.Valid {
+			slot.LastError = lastError.String
+		}
+		if remark.Valid {
+			slot.Remark = remark.String
+		}
+		slots = append(slots, slot)
+	}
+
+	return slots, rows.Err()
+}
+
+func (s *SQLiteStorage) GetCodexSlot(id int64) (*CodexSlot, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var slot CodexSlot
+	var accountID, status, lastError, remark sql.NullString
+	var cooldownUntil, lastCheckedAt, lastUsedAt sql.NullTime
+	err := s.db.QueryRow(`SELECT id, name, state_dir, account_id, status, enabled, cooldown_until, last_checked_at, last_used_at, last_error, remark, created_at, updated_at FROM codex_slots WHERE id=?`, id).
+		Scan(&slot.ID, &slot.Name, &slot.StateDir, &accountID, &status, &slot.Enabled, &cooldownUntil, &lastCheckedAt, &lastUsedAt, &lastError, &remark, &slot.CreatedAt, &slot.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if accountID.Valid {
+		slot.AccountID = accountID.String
+	}
+	if status.Valid {
+		slot.Status = status.String
+	}
+	if cooldownUntil.Valid {
+		slot.CooldownUntil = cooldownUntil.Time
+	}
+	if lastCheckedAt.Valid {
+		slot.LastCheckedAt = lastCheckedAt.Time
+	}
+	if lastUsedAt.Valid {
+		slot.LastUsedAt = lastUsedAt.Time
+	}
+	if lastError.Valid {
+		slot.LastError = lastError.String
+	}
+	if remark.Valid {
+		slot.Remark = remark.String
+	}
+
+	return &slot, nil
+}
+
+func (s *SQLiteStorage) SaveCodexSlot(slot *CodexSlot) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(`INSERT INTO codex_slots (name, state_dir, account_id, status, enabled, cooldown_until, last_checked_at, last_used_at, last_error, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		slot.Name, slot.StateDir, nullableString(slot.AccountID), nullableString(defaultString(slot.Status, "unknown")), slot.Enabled, nullableTime(slot.CooldownUntil), nullableTime(slot.LastCheckedAt), nullableTime(slot.LastUsedAt), nullableString(slot.LastError), nullableString(slot.Remark))
+	if err != nil {
+		return err
+	}
+	if slot.ID == 0 {
+		id, err := result.LastInsertId()
+		if err != nil {
+			return err
+		}
+		slot.ID = id
+	}
+	return nil
+}
+
+func (s *SQLiteStorage) UpdateCodexSlot(slot *CodexSlot) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if slot.ID == 0 {
+		return fmt.Errorf("missing codex slot id")
+	}
+	_, err := s.db.Exec(`UPDATE codex_slots SET name=?, state_dir=?, account_id=?, status=?, enabled=?, cooldown_until=?, last_checked_at=?, last_used_at=?, last_error=?, remark=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		slot.Name, slot.StateDir, nullableString(slot.AccountID), nullableString(defaultString(slot.Status, "unknown")), slot.Enabled, nullableTime(slot.CooldownUntil), nullableTime(slot.LastCheckedAt), nullableTime(slot.LastUsedAt), nullableString(slot.LastError), nullableString(slot.Remark), slot.ID)
+	return err
+}
+
+func (s *SQLiteStorage) DeleteCodexSlot(id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM codex_pool_slots WHERE slot_id=?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM codex_slots WHERE id=?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *SQLiteStorage) GetCodexPools() ([]CodexPool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`SELECT id, name, strategy, enabled, cooldown_429_sec, cooldown_5xx_sec, auth_expired_policy, created_at, updated_at FROM codex_pools ORDER BY name ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var pools []CodexPool
+	for rows.Next() {
+		var pool CodexPool
+		var strategy, authExpiredPolicy sql.NullString
+		if err := rows.Scan(&pool.ID, &pool.Name, &strategy, &pool.Enabled, &pool.Cooldown429Sec, &pool.Cooldown5xxSec, &authExpiredPolicy, &pool.CreatedAt, &pool.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if strategy.Valid {
+			pool.Strategy = strategy.String
+		}
+		if authExpiredPolicy.Valid {
+			pool.AuthExpiredPolicy = authExpiredPolicy.String
+		}
+		slotIDs, err := s.getPoolSlotIDsLocked(pool.ID)
+		if err != nil {
+			return nil, err
+		}
+		pool.SlotIDs = slotIDs
+		pools = append(pools, pool)
+	}
+
+	return pools, rows.Err()
+}
+
+func (s *SQLiteStorage) GetCodexPool(id int64) (*CodexPool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var pool CodexPool
+	var strategy, authExpiredPolicy sql.NullString
+	err := s.db.QueryRow(`SELECT id, name, strategy, enabled, cooldown_429_sec, cooldown_5xx_sec, auth_expired_policy, created_at, updated_at FROM codex_pools WHERE id=?`, id).
+		Scan(&pool.ID, &pool.Name, &strategy, &pool.Enabled, &pool.Cooldown429Sec, &pool.Cooldown5xxSec, &authExpiredPolicy, &pool.CreatedAt, &pool.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if strategy.Valid {
+		pool.Strategy = strategy.String
+	}
+	if authExpiredPolicy.Valid {
+		pool.AuthExpiredPolicy = authExpiredPolicy.String
+	}
+	slotIDs, err := s.getPoolSlotIDsLocked(pool.ID)
+	if err != nil {
+		return nil, err
+	}
+	pool.SlotIDs = slotIDs
+	return &pool, nil
+}
+
+func (s *SQLiteStorage) SaveCodexPool(pool *CodexPool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(`INSERT INTO codex_pools (name, strategy, enabled, cooldown_429_sec, cooldown_5xx_sec, auth_expired_policy) VALUES (?, ?, ?, ?, ?, ?)`,
+		pool.Name, defaultString(pool.Strategy, "rr"), pool.Enabled, defaultInt(pool.Cooldown429Sec, 600), defaultInt(pool.Cooldown5xxSec, 120), defaultString(pool.AuthExpiredPolicy, "skip"))
+	if err != nil {
+		return err
+	}
+	if pool.ID == 0 {
+		id, err := result.LastInsertId()
+		if err != nil {
+			return err
+		}
+		pool.ID = id
+	}
+	if err := replacePoolSlots(tx, pool.ID, pool.SlotIDs); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *SQLiteStorage) UpdateCodexPool(pool *CodexPool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if pool.ID == 0 {
+		return fmt.Errorf("missing codex pool id")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`UPDATE codex_pools SET name=?, strategy=?, enabled=?, cooldown_429_sec=?, cooldown_5xx_sec=?, auth_expired_policy=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		pool.Name, defaultString(pool.Strategy, "rr"), pool.Enabled, defaultInt(pool.Cooldown429Sec, 600), defaultInt(pool.Cooldown5xxSec, 120), defaultString(pool.AuthExpiredPolicy, "skip"), pool.ID); err != nil {
+		return err
+	}
+	if err := replacePoolSlots(tx, pool.ID, pool.SlotIDs); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *SQLiteStorage) DeleteCodexPool(id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM codex_pool_slots WHERE pool_id=?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE endpoints SET codex_pool_id=0, auth_type='apikey' WHERE codex_pool_id=?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM codex_pools WHERE id=?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *SQLiteStorage) RecordDailyStat(stat *DailyStat) error {
@@ -348,6 +690,64 @@ func (s *SQLiteStorage) SetConfig(key, value string) error {
 
 func (s *SQLiteStorage) Close() error {
 	return s.db.Close()
+}
+
+func (s *SQLiteStorage) getPoolSlotIDsLocked(poolID int64) ([]int64, error) {
+	rows, err := s.db.Query(`SELECT slot_id FROM codex_pool_slots WHERE pool_id=? ORDER BY sort_order ASC, slot_id ASC`, poolID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var slotIDs []int64
+	for rows.Next() {
+		var slotID int64
+		if err := rows.Scan(&slotID); err != nil {
+			return nil, err
+		}
+		slotIDs = append(slotIDs, slotID)
+	}
+	return slotIDs, rows.Err()
+}
+
+func replacePoolSlots(tx *sql.Tx, poolID int64, slotIDs []int64) error {
+	if _, err := tx.Exec(`DELETE FROM codex_pool_slots WHERE pool_id=?`, poolID); err != nil {
+		return err
+	}
+	for idx, slotID := range slotIDs {
+		if _, err := tx.Exec(`INSERT INTO codex_pool_slots (pool_id, slot_id, sort_order) VALUES (?, ?, ?)`, poolID, slotID, idx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func nullableString(v string) interface{} {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	return v
+}
+
+func nullableTime(v time.Time) interface{} {
+	if v.IsZero() {
+		return nil
+	}
+	return v
+}
+
+func defaultString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+func defaultInt(value, fallback int) int {
+	if value == 0 {
+		return fallback
+	}
+	return value
 }
 
 func (s *SQLiteStorage) GetTotalStats() (int, map[string]*EndpointStats, error) {

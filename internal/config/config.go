@@ -14,6 +14,8 @@ type Endpoint struct {
 	Name        string `json:"name"`
 	APIUrl      string `json:"apiUrl"`
 	APIKey      string `json:"apiKey"`
+	AuthType    string `json:"authType,omitempty"`    // apikey or codex_pool
+	CodexPoolID int64  `json:"codexPoolId,omitempty"` // Codex slot pool id when authType=codex_pool
 	Enabled     bool   `json:"enabled"`
 	Transformer string `json:"transformer,omitempty"` // Transformer type: claude, openai, gemini, deepseek
 	Model       string `json:"model,omitempty"`       // Target model name for non-Claude APIs
@@ -144,8 +146,19 @@ func (c *Config) Validate() error {
 		if ep.APIUrl == "" {
 			return fmt.Errorf("endpoint %d: apiUrl is required", i+1)
 		}
-		if ep.APIKey == "" {
+		authType := ep.AuthType
+		if authType == "" {
+			authType = "apikey"
+			c.Endpoints[i].AuthType = authType
+		}
+		if authType != "apikey" && authType != "codex_pool" {
+			return fmt.Errorf("endpoint %d (%s): invalid authType '%s'", i+1, ep.Name, authType)
+		}
+		if authType == "apikey" && ep.APIKey == "" {
 			return fmt.Errorf("endpoint %d: apiKey is required", i+1)
+		}
+		if authType == "codex_pool" && ep.CodexPoolID <= 0 {
+			return fmt.Errorf("endpoint %d (%s): codexPoolId is required", i+1, ep.Name)
 		}
 
 		// Default to claude transformer if not specified
@@ -464,6 +477,8 @@ type StorageEndpoint struct {
 	Name        string
 	APIUrl      string
 	APIKey      string
+	AuthType    string
+	CodexPoolID int64
 	Enabled     bool
 	Transformer string
 	Model       string
@@ -501,6 +516,8 @@ func LoadFromStorage(storage StorageAdapter) (*Config, error) {
 			Name:        ep.Name,
 			APIUrl:      ep.APIUrl,
 			APIKey:      ep.APIKey,
+			AuthType:    ep.AuthType,
+			CodexPoolID: ep.CodexPoolID,
 			Enabled:     ep.Enabled,
 			Transformer: ep.Transformer,
 			Model:       ep.Model,
@@ -513,6 +530,9 @@ func LoadFromStorage(storage StorageAdapter) (*Config, error) {
 		}
 		if endpoint.ClientType == "" {
 			endpoint.ClientType = InferClientType(endpoint.Transformer)
+		}
+		if endpoint.AuthType == "" {
+			endpoint.AuthType = "apikey"
 		}
 		config.Endpoints = append(config.Endpoints, endpoint)
 	}
@@ -744,11 +764,17 @@ func (c *Config) SaveToStorage(storage StorageAdapter) error {
 		if clientType == "" {
 			clientType = InferClientType(ep.Transformer)
 		}
+		authType := ep.AuthType
+		if authType == "" {
+			authType = "apikey"
+		}
 		endpoint := &StorageEndpoint{
 			ID:          ep.ID,
 			Name:        ep.Name,
 			APIUrl:      ep.APIUrl,
 			APIKey:      ep.APIKey,
+			AuthType:    authType,
+			CodexPoolID: ep.CodexPoolID,
 			Enabled:     ep.Enabled,
 			Transformer: ep.Transformer,
 			Model:       ep.Model,

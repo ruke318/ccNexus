@@ -104,6 +104,8 @@ func (h *Handler) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		Name        string `json:"name"`
 		APIUrl      string `json:"apiUrl"`
 		APIKey      string `json:"apiKey"`
+		AuthType    string `json:"authType"`
+		CodexPoolID int64  `json:"codexPoolId"`
 		Enabled     bool   `json:"enabled"`
 		Transformer string `json:"transformer"`
 		Model       string `json:"model"`
@@ -118,8 +120,16 @@ func (h *Handler) createEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required fields
-	if req.Name == "" || req.APIUrl == "" || req.APIKey == "" {
-		WriteError(w, http.StatusBadRequest, "Name, apiUrl, and apiKey are required")
+	if req.Name == "" || req.APIUrl == "" {
+		WriteError(w, http.StatusBadRequest, "Name and apiUrl are required")
+		return
+	}
+	if req.AuthType == "codex_pool" && req.CodexPoolID <= 0 {
+		WriteError(w, http.StatusBadRequest, "codexPoolId is required for codex_pool auth")
+		return
+	}
+	if req.AuthType != "codex_pool" && req.APIKey == "" {
+		WriteError(w, http.StatusBadRequest, "apiKey is required")
 		return
 	}
 
@@ -152,6 +162,8 @@ func (h *Handler) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		Name:        req.Name,
 		APIUrl:      normalizeAPIUrl(req.APIUrl),
 		APIKey:      req.APIKey,
+		AuthType:    req.AuthType,
+		CodexPoolID: req.CodexPoolID,
 		Enabled:     req.Enabled,
 		Transformer: req.Transformer,
 		Model:       req.Model,
@@ -184,6 +196,8 @@ func (h *Handler) updateEndpoint(w http.ResponseWriter, r *http.Request, name st
 		Name        string `json:"name"`
 		APIUrl      string `json:"apiUrl"`
 		APIKey      string `json:"apiKey"`
+		AuthType    string `json:"authType"`
+		CodexPoolID int64  `json:"codexPoolId"`
 		Enabled     bool   `json:"enabled"`
 		Transformer string `json:"transformer"`
 		Model       string `json:"model"`
@@ -227,6 +241,12 @@ func (h *Handler) updateEndpoint(w http.ResponseWriter, r *http.Request, name st
 	}
 	if req.APIKey != "" {
 		existing.APIKey = req.APIKey
+	}
+	if req.AuthType != "" {
+		existing.AuthType = req.AuthType
+	}
+	if req.CodexPoolID > 0 {
+		existing.CodexPoolID = req.CodexPoolID
 	}
 	existing.Enabled = req.Enabled
 	if req.Transformer != "" {

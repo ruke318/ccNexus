@@ -3,6 +3,8 @@
 
 export function AddEndpoint(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string,arg8:string):Promise<void>;
 
+export function AddEndpointAdvanced(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string,arg8:string,arg9:string,arg10:number):Promise<void>;
+
 export function AddProjectDir(arg1:string):Promise<void>;
 
 export function ApplyUpdate(arg1:string):Promise<string>;
@@ -17,11 +19,21 @@ export function CheckForUpdates():Promise<string>;
 
 export function ClearLogs():Promise<void>;
 
+export function CreateAIConfig(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function CreateCodexPool(arg1:string,arg2:Array<number>):Promise<string>;
+
+export function CreateCodexSlot(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function DeleteArchive(arg1:string):Promise<string>;
 
 export function DeleteBackups(arg1:string,arg2:Array<string>):Promise<void>;
 
+export function DeleteCodexPool(arg1:number):Promise<void>;
+
 export function DeleteCodexSession(arg1:string):Promise<void>;
+
+export function DeleteCodexSlot(arg1:number):Promise<void>;
 
 export function DeleteSession(arg1:string,arg2:string):Promise<void>;
 
@@ -39,7 +51,7 @@ export function FetchBroadcast(arg1:string):Promise<string>;
 
 export function FetchImageAsBase64(arg1:string):Promise<string>;
 
-export function FetchModels(arg1:string,arg2:string,arg3:string):Promise<string>;
+export function FetchModels(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:number):Promise<string>;
 
 export function GenerateMockArchives(arg1:number):Promise<string>;
 
@@ -109,6 +121,8 @@ export function InstallUpdate(arg1:string):Promise<string>;
 
 export function LaunchCodexSessionTerminal(arg1:string,arg2:string):Promise<void>;
 
+export function LaunchCodexSlotLogin(arg1:number):Promise<void>;
+
 export function LaunchCodexTerminal(arg1:string):Promise<void>;
 
 export function LaunchSessionTerminal(arg1:string,arg2:string):Promise<void>;
@@ -119,11 +133,25 @@ export function ListArchives():Promise<string>;
 
 export function ListBackups(arg1:string):Promise<string>;
 
+export function ListCodexPools():Promise<string>;
+
+export function ListCodexSlots():Promise<string>;
+
+export function ListSkillDirs():Promise<string>;
+
+export function ListSkillFiles():Promise<string>;
+
 export function ListWebDAVBackups():Promise<string>;
 
 export function OpenURL(arg1:string):Promise<void>;
 
 export function Quit():Promise<void>;
+
+export function ReadAIConfig(arg1:string,arg2:string):Promise<string>;
+
+export function ReadSkillDoc(arg1:string):Promise<string>;
+
+export function ReadSkillFile(arg1:string):Promise<string>;
 
 export function RemoveEndpoint(arg1:number):Promise<void>;
 
@@ -171,6 +199,8 @@ export function SkipVersion(arg1:string):Promise<void>;
 
 export function SwitchToEndpoint(arg1:string,arg2:string):Promise<void>;
 
+export function SyncCodexSlotStatus(arg1:number):Promise<string>;
+
 export function TestAllEndpointsZeroCost():Promise<string>;
 
 export function TestEndpoint(arg1:number):Promise<string>;
@@ -185,9 +215,15 @@ export function ToggleEndpoint(arg1:number,arg2:boolean):Promise<void>;
 
 export function UpdateBackupProvider(arg1:string):Promise<void>;
 
+export function UpdateCodexPool(arg1:number,arg2:string,arg3:string,arg4:boolean,arg5:number,arg6:number,arg7:string,arg8:Array<number>):Promise<string>;
+
+export function UpdateCodexSlot(arg1:number,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<string>;
+
 export function UpdateConfig(arg1:string):Promise<void>;
 
 export function UpdateEndpoint(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string,arg8:string,arg9:string):Promise<void>;
+
+export function UpdateEndpointAdvanced(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string,arg8:string,arg9:string,arg10:string,arg11:number):Promise<void>;
 
 export function UpdateLocalBackupDir(arg1:string):Promise<void>;
 
@@ -196,3 +232,7 @@ export function UpdatePorts(arg1:number,arg2:number):Promise<void>;
 export function UpdateS3BackupConfig(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string,arg8:boolean,arg9:boolean):Promise<void>;
 
 export function UpdateWebDAVConfig(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function WriteAIConfig(arg1:string,arg2:string,arg3:string,arg4:number):Promise<string>;
+
+export function WriteSkillFile(arg1:string,arg2:string,arg3:number):Promise<string>;

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/lich0821/ccNexus/internal/codexpool"
 	"github.com/lich0821/ccNexus/internal/config"
 	"github.com/lich0821/ccNexus/internal/logger"
 	"github.com/lich0821/ccNexus/internal/proxy"
@@ -55,7 +56,8 @@ func main() {
 	}
 
 	statsAdapter := storage.NewStatsStorageAdapter(sqliteStorage)
-	p := proxy.New(cfg, statsAdapter, deviceID)
+	poolManager := codexpool.NewManager(sqliteStorage)
+	p := proxy.New(cfg, statsAdapter, deviceID, poolManager)
 
 	// Create HTTP mux
 	mux := http.NewServeMux()

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lich0821/ccNexus/internal/codexpool"
 	"github.com/lich0821/ccNexus/internal/config"
 	"github.com/lich0821/ccNexus/internal/logger"
 	"github.com/lich0821/ccNexus/internal/proxy"
@@ -35,21 +36,28 @@ func (e *EndpointService) createHTTPClient(proxyURL string, timeout time.Duratio
 const (
 	testMessage   = "你是什么模型?"
 	testMaxTokens = 16
+	testTimeout   = 30 * time.Second
+
+	codexPoolBackendBaseURL     = "https://chatgpt.com/backend-api/codex"
+	codexPoolDefaultInstruction = "You are Codex. Be concise."
+	codexPoolModelsClientVer    = "0.111.0"
 )
 
 // EndpointService handles endpoint management operations
 type EndpointService struct {
-	config  *config.Config
-	proxy   *proxy.Proxy
-	storage *storage.SQLiteStorage
+	config    *config.Config
+	proxy     *proxy.Proxy
+	storage   *storage.SQLiteStorage
+	codexPool *codexpool.Manager
 }
 
 // NewEndpointService creates a new EndpointService
-func NewEndpointService(cfg *config.Config, p *proxy.Proxy, s *storage.SQLiteStorage) *EndpointService {
+func NewEndpointService(cfg *config.Config, p *proxy.Proxy, s *storage.SQLiteStorage, codexPool *codexpool.Manager) *EndpointService {
 	return &EndpointService{
-		config:  cfg,
-		proxy:   p,
-		storage: s,
+		config:    cfg,
+		proxy:     p,
+		storage:   s,
+		codexPool: codexPool,
 	}
 }
 
@@ -70,6 +78,11 @@ func normalizeAPIUrl(apiUrl string) string {
 
 // AddEndpoint adds a new endpoint
 func (e *EndpointService) AddEndpoint(name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType string) error {
+	return e.AddEndpointAdvanced(name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType, codexpool.AuthTypeAPIKey, 0)
+}
+
+// AddEndpointAdvanced adds a new endpoint with explicit auth settings.
+func (e *EndpointService) AddEndpointAdvanced(name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType, authType string, codexPoolID int64) error {
 	endpoints := e.config.GetEndpoints()
 	for _, ep := range endpoints {
 		if ep.Name == name {
@@ -86,6 +99,14 @@ func (e *EndpointService) AddEndpoint(name, apiUrl, apiKey, transformer, model, 
 	if clientType != "claude" && clientType != "codex" {
 		return fmt.Errorf("invalid client type: %s", clientType)
 	}
+	if authType == "" {
+		authType = codexpool.AuthTypeAPIKey
+	}
+	if authType == codexpool.AuthTypeCodexPool {
+		apiUrl = codexPoolBackendBaseURL
+		apiKey = ""
+		transformer = "openai2"
+	}
 
 	apiUrl = normalizeAPIUrl(apiUrl)
 
@@ -93,6 +114,8 @@ func (e *EndpointService) AddEndpoint(name, apiUrl, apiKey, transformer, model, 
 		Name:        name,
 		APIUrl:      apiUrl,
 		APIKey:      apiKey,
+		AuthType:    authType,
+		CodexPoolID: codexPoolID,
 		Enabled:     true,
 		Transformer: transformer,
 		Model:       model,
@@ -162,6 +185,11 @@ func (e *EndpointService) RemoveEndpoint(endpointID int64) error {
 
 // UpdateEndpoint updates an endpoint by id
 func (e *EndpointService) UpdateEndpoint(endpointID int64, name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType string) error {
+	return e.UpdateEndpointAdvanced(endpointID, name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType, "", 0)
+}
+
+// UpdateEndpointAdvanced updates an endpoint by id with explicit auth settings.
+func (e *EndpointService) UpdateEndpointAdvanced(endpointID int64, name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType, authType string, codexPoolID int64) error {
 	endpoints := e.config.GetEndpoints()
 	index, err := e.findEndpointIndexByID(endpointID)
 	if err != nil {
@@ -189,6 +217,20 @@ func (e *EndpointService) UpdateEndpoint(endpointID int64, name, apiUrl, apiKey,
 	if clientType != "claude" && clientType != "codex" {
 		return fmt.Errorf("invalid client type: %s", clientType)
 	}
+	if authType == "" {
+		authType = endpoints[index].AuthType
+	}
+	if authType == "" {
+		authType = codexpool.AuthTypeAPIKey
+	}
+	if authType == codexpool.AuthTypeCodexPool && codexPoolID == 0 {
+		codexPoolID = endpoints[index].CodexPoolID
+	}
+	if authType == codexpool.AuthTypeCodexPool {
+		apiUrl = codexPoolBackendBaseURL
+		apiKey = ""
+		transformer = "openai2"
+	}
 
 	apiUrl = normalizeAPIUrl(apiUrl)
 
@@ -197,6 +239,8 @@ func (e *EndpointService) UpdateEndpoint(endpointID int64, name, apiUrl, apiKey,
 		Name:        name,
 		APIUrl:      apiUrl,
 		APIKey:      apiKey,
+		AuthType:    authType,
+		CodexPoolID: codexPoolID,
 		Enabled:     enabled,
 		Transformer: transformer,
 		Model:       model,
@@ -415,12 +459,16 @@ func (e *EndpointService) TestEndpoint(endpointID int64) string {
 		})
 
 	case "openai2":
-		apiPath = "/v1/responses"
+		if endpoint.AuthType == codexpool.AuthTypeCodexPool {
+			apiPath = "/responses"
+		} else {
+			apiPath = "/v1/responses"
+		}
 		model := endpoint.Model
 		if model == "" {
 			model = "gpt-5-codex"
 		}
-		requestBody, err = json.Marshal(map[string]interface{}{
+		request := map[string]interface{}{
 			"model": model,
 			"input": []map[string]interface{}{
 				{
@@ -431,7 +479,13 @@ func (e *EndpointService) TestEndpoint(endpointID int64) string {
 					},
 				},
 			},
-		})
+		}
+		if endpoint.AuthType == codexpool.AuthTypeCodexPool {
+			request["store"] = false
+			request["stream"] = true
+			request["instructions"] = codexPoolDefaultInstruction
+		}
+		requestBody, err = json.Marshal(request)
 
 	case "gemini":
 		model := endpoint.Model
@@ -465,7 +519,9 @@ func (e *EndpointService) TestEndpoint(endpointID int64) string {
 	}
 
 	normalizedAPIUrl := normalizeAPIUrl(endpoint.APIUrl)
-	if !strings.HasPrefix(normalizedAPIUrl, "http://") && !strings.HasPrefix(normalizedAPIUrl, "https://") {
+	if endpoint.AuthType == codexpool.AuthTypeCodexPool && transformer == "openai2" {
+		normalizedAPIUrl = codexPoolBackendBaseURL
+	} else if !strings.HasPrefix(normalizedAPIUrl, "http://") && !strings.HasPrefix(normalizedAPIUrl, "https://") {
 		normalizedAPIUrl = "https://" + normalizedAPIUrl
 	}
 	url := fmt.Sprintf("%s%s", normalizedAPIUrl, apiPath)
@@ -481,19 +537,39 @@ func (e *EndpointService) TestEndpoint(endpointID int64) string {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	if endpoint.AuthType == codexpool.AuthTypeCodexPool && transformer == "openai2" {
+		req.Header.Set("Accept", "text/event-stream")
+	}
+	var authCtx *codexpool.AuthContext
+	if endpoint.AuthType == codexpool.AuthTypeCodexPool && e.codexPool != nil {
+		authCtx, err = e.codexPool.ResolveAuthForPool(endpoint.CodexPoolID)
+		if err != nil {
+			result := map[string]interface{}{
+				"success": false,
+				"message": fmt.Sprintf("Failed to resolve codex pool auth: %v", err),
+			}
+			data, _ := json.Marshal(result)
+			return string(data)
+		}
+	}
 	switch transformer {
 	case "claude":
 		req.Header.Set("x-api-key", endpoint.APIKey)
 		req.Header.Set("anthropic-version", "2023-06-01")
 	case "openai", "openai2":
-		req.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
+		bearerToken := endpoint.APIKey
+		if authCtx != nil && authCtx.BearerToken != "" {
+			bearerToken = authCtx.BearerToken
+			req.Header.Set("ChatGPT-Account-Id", authCtx.AccountID)
+		}
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
 	case "gemini":
 		q := req.URL.Query()
 		q.Add("key", endpoint.APIKey)
 		req.URL.RawQuery = q.Encode()
 	}
 
-	client := e.createHTTPClient(endpoint.ProxyURL, 30*time.Second)
+	client := e.createHTTPClient(endpoint.ProxyURL, testTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		result := map[string]interface{}{
@@ -525,6 +601,19 @@ func (e *EndpointService) TestEndpoint(endpointID int64) string {
 		data, _ := json.Marshal(result)
 		logger.Error("Test failed for %s: HTTP %d", endpoint.Name, resp.StatusCode)
 		return string(data)
+	}
+
+	if endpoint.AuthType == codexpool.AuthTypeCodexPool && transformer == "openai2" {
+		bodyText := string(respBody)
+		if strings.Contains(bodyText, "response.completed") {
+			result := map[string]interface{}{
+				"success": true,
+				"message": "Codex backend reachable",
+			}
+			data, _ := json.Marshal(result)
+			logger.Info("Test successful for %s", endpoint.Name)
+			return string(data)
+		}
 	}
 
 	var responseData map[string]interface{}
@@ -600,6 +689,10 @@ func (e *EndpointService) TestEndpointLight(endpointID int64) string {
 
 	endpoint := endpoints[index]
 	logger.Info("Testing endpoint (light): %s (%s)", endpoint.Name, endpoint.APIUrl)
+
+	if endpoint.AuthType == codexpool.AuthTypeCodexPool {
+		return e.TestEndpoint(endpointID)
+	}
 
 	transformer := endpoint.Transformer
 	if transformer == "" {
@@ -926,36 +1019,43 @@ func (e *EndpointService) testMinimalRequest(apiUrl, apiKey, transformer, model,
 }
 
 // FetchModels fetches available models from the API provider
-func (e *EndpointService) FetchModels(apiUrl, apiKey, transformer, proxyURL string) string {
+func (e *EndpointService) FetchModels(apiUrl, apiKey, transformer, proxyURL, authType string, codexPoolID int64) string {
 	logger.Info("Fetching models for transformer: %s", transformer)
 
+	if authType == "" {
+		authType = codexpool.AuthTypeAPIKey
+	}
 	if transformer == "" {
 		transformer = "claude"
-	}
-
-	normalizedAPIUrl := normalizeAPIUrl(apiUrl)
-	if !strings.HasPrefix(normalizedAPIUrl, "http://") && !strings.HasPrefix(normalizedAPIUrl, "https://") {
-		normalizedAPIUrl = "https://" + normalizedAPIUrl
 	}
 
 	var models []string
 	var err error
 
-	switch transformer {
-	case "claude":
-		models, err = e.fetchOpenAIModels(normalizedAPIUrl, apiKey, proxyURL)
-	case "openai", "openai2":
-		models, err = e.fetchOpenAIModels(normalizedAPIUrl, apiKey, proxyURL)
-	case "gemini":
-		models, err = e.fetchGeminiModels(normalizedAPIUrl, apiKey, proxyURL)
-	default:
-		result := map[string]interface{}{
-			"success": false,
-			"message": fmt.Sprintf("Unsupported transformer: %s", transformer),
-			"models":  []string{},
+	if authType == codexpool.AuthTypeCodexPool {
+		models, err = e.fetchCodexPoolModels(codexPoolID, proxyURL)
+	} else {
+		normalizedAPIUrl := normalizeAPIUrl(apiUrl)
+		if !strings.HasPrefix(normalizedAPIUrl, "http://") && !strings.HasPrefix(normalizedAPIUrl, "https://") {
+			normalizedAPIUrl = "https://" + normalizedAPIUrl
 		}
-		data, _ := json.Marshal(result)
-		return string(data)
+
+		switch transformer {
+		case "claude":
+			models, err = e.fetchOpenAIModels(normalizedAPIUrl, apiKey, proxyURL)
+		case "openai", "openai2":
+			models, err = e.fetchOpenAIModels(normalizedAPIUrl, apiKey, proxyURL)
+		case "gemini":
+			models, err = e.fetchGeminiModels(normalizedAPIUrl, apiKey, proxyURL)
+		default:
+			result := map[string]interface{}{
+				"success": false,
+				"message": fmt.Sprintf("Unsupported transformer: %s", transformer),
+				"models":  []string{},
+			}
+			data, _ := json.Marshal(result)
+			return string(data)
+		}
 	}
 
 	if err != nil {
@@ -976,6 +1076,81 @@ func (e *EndpointService) FetchModels(apiUrl, apiKey, transformer, proxyURL stri
 	data, _ := json.Marshal(result)
 	logger.Info("Fetched %d models for %s", len(models), transformer)
 	return string(data)
+}
+
+func (e *EndpointService) fetchCodexPoolModels(codexPoolID int64, proxyURL string) ([]string, error) {
+	if codexPoolID <= 0 {
+		return nil, fmt.Errorf("codex pool is required")
+	}
+	if e.codexPool == nil {
+		return nil, fmt.Errorf("codex pool manager not initialized")
+	}
+
+	authCtx, err := e.codexPool.ResolveAuthForPool(codexPoolID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve codex pool auth: %w", err)
+	}
+	if strings.TrimSpace(authCtx.BearerToken) == "" {
+		return nil, fmt.Errorf("codex pool returned empty access token")
+	}
+	if strings.TrimSpace(authCtx.AccountID) == "" {
+		return nil, fmt.Errorf("codex pool returned empty account id")
+	}
+
+	url := fmt.Sprintf("%s/models?client_version=%s", codexPoolBackendBaseURL, codexPoolModelsClientVer)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+authCtx.BearerToken)
+	req.Header.Set("ChatGPT-Account-Id", authCtx.AccountID)
+
+	client := e.createHTTPClient(proxyURL, 30*time.Second)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var result struct {
+		Models []struct {
+			Slug           string `json:"slug"`
+			SupportedInAPI bool   `json:"supported_in_api"`
+			Visibility     string `json:"visibility"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %v", err)
+	}
+
+	seen := make(map[string]bool)
+	models := make([]string, 0, len(result.Models))
+	for _, model := range result.Models {
+		slug := strings.TrimSpace(model.Slug)
+		if slug == "" || seen[slug] {
+			continue
+		}
+		if !model.SupportedInAPI {
+			continue
+		}
+		if model.Visibility != "" && model.Visibility != "list" {
+			continue
+		}
+		seen[slug] = true
+		models = append(models, slug)
+	}
+	if len(models) == 0 {
+		return nil, fmt.Errorf("no_models_found")
+	}
+	return models, nil
 }
 
 func (e *EndpointService) fetchOpenAIModels(apiUrl, apiKey, proxyURL string) ([]string, error) {

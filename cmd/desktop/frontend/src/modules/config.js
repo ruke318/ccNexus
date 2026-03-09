@@ -40,8 +40,39 @@ export async function addEndpoint(name, url, key, transformer, model, remark, pr
     await window.go.main.App.AddEndpoint(name, url, key, transformer, model, remark || '', proxyUrl || '', clientType || '');
 }
 
+export async function addEndpointAdvanced(name, url, key, transformer, model, remark, proxyUrl, clientType, authType, codexPoolId) {
+    await window.go.main.App.AddEndpointAdvanced(
+        name,
+        url,
+        key,
+        transformer,
+        model,
+        remark || '',
+        proxyUrl || '',
+        clientType || '',
+        authType || 'apikey',
+        codexPoolId || 0
+    );
+}
+
 export async function updateEndpoint(id, name, url, key, transformer, model, remark, proxyUrl, clientType) {
     await window.go.main.App.UpdateEndpoint(id, name, url, key, transformer, model, remark || '', proxyUrl || '', clientType || '');
+}
+
+export async function updateEndpointAdvanced(id, name, url, key, transformer, model, remark, proxyUrl, clientType, authType, codexPoolId) {
+    await window.go.main.App.UpdateEndpointAdvanced(
+        id,
+        name,
+        url,
+        key,
+        transformer,
+        model,
+        remark || '',
+        proxyUrl || '',
+        clientType || '',
+        authType || 'apikey',
+        codexPoolId || 0
+    );
 }
 
 export async function removeEndpoint(id) {

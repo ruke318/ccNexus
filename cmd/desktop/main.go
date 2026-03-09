@@ -26,19 +26,23 @@ var trayIconWindows []byte
 var trayIconOther []byte
 
 func main() {
-	// Check for single instance
-	mutex, err := singleinstance.CreateMutex("Global\\ccNexus-SingleInstance-Mutex")
-	if err != nil {
-		// Another instance is already running, try to show it
-		log.Printf("Another instance is already running, attempting to show existing window...")
-		if singleinstance.FindAndShowExistingWindow("ccNexus") {
-			log.Printf("Successfully brought existing window to foreground")
-		} else {
-			log.Printf("Could not find existing window, but another instance is running")
+	var mutex *singleinstance.Mutex
+	var err error
+	if os.Getenv("CCNEXUS_SKIP_SINGLE_INSTANCE") != "1" {
+		// Allow packaging/dev tooling to bypass the runtime lock when needed.
+		mutex, err = singleinstance.CreateMutex("Global\\ccNexus-SingleInstance-Mutex")
+		if err != nil {
+			// Another instance is already running, try to show it
+			log.Printf("Another instance is already running, attempting to show existing window...")
+			if singleinstance.FindAndShowExistingWindow("ccNexus") {
+				log.Printf("Successfully brought existing window to foreground")
+			} else {
+				log.Printf("Could not find existing window, but another instance is running")
+			}
+			os.Exit(0)
 		}
-		os.Exit(0)
+		defer mutex.Release()
 	}
-	defer mutex.Release()
 
 	// Select appropriate tray icon based on OS
 	var trayIcon []byte
@@ -53,7 +57,7 @@ func main() {
 	app := NewApp(trayIcon)
 
 	// Load window size from SQLite storage
-	windowWidth, windowHeight := 1024, 768 // defaults
+	windowWidth, windowHeight := 1280, 800 // defaults - 横屏比例
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
 		dbPath := filepath.Join(homeDir, ".ccNexus", "ccnexus.db")
@@ -89,8 +93,8 @@ func main() {
 		},
 		Frameless:     false,
 		Fullscreen:    false,
-		MinWidth:      800,
-		MinHeight:     600,
+		MinWidth:      1000, // 最小宽度改为 1000，更适合横屏
+		MinHeight:     650,  // 最小高度改为 650
 		DisableResize: false,
 		Mac: &mac.Options{
 			TitleBar: &mac.TitleBar{

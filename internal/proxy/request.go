@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lich0821/ccNexus/internal/codexpool"
 	"golang.org/x/net/proxy"
 
 	"github.com/lich0821/ccNexus/internal/config"
@@ -18,6 +19,11 @@ import (
 	"github.com/lich0821/ccNexus/internal/transformer/cc"
 	"github.com/lich0821/ccNexus/internal/transformer/cx/chat"
 	"github.com/lich0821/ccNexus/internal/transformer/cx/responses"
+)
+
+const (
+	codexPoolBackendBaseURL     = "https://chatgpt.com/backend-api/codex"
+	codexPoolDefaultInstruction = "You are Codex. Be concise."
 )
 
 // prepareTransformerForClient creates transformer based on client format and endpoint
@@ -128,6 +134,10 @@ func prepareCxRespTransformer(endpoint config.Endpoint, endpointTransformer stri
 
 // getTargetPath determines the target API path based on transformer name
 func getTargetPath(originalPath string, endpoint config.Endpoint, transformedBody []byte, transformerName string) string {
+	if useCodexPoolResponsesBackend(endpoint, transformerName) {
+		return "/responses"
+	}
+
 	switch transformerName {
 	case "cc_claude", "cx_chat_claude", "cx_resp_claude":
 		return "/v1/messages"
@@ -149,14 +159,26 @@ func getTargetPath(originalPath string, endpoint config.Endpoint, transformedBod
 }
 
 // buildProxyRequest creates an HTTP request for the target API
-func buildProxyRequest(r *http.Request, endpoint config.Endpoint, transformedBody []byte, transformerName string) (*http.Request, error) {
+func buildProxyRequest(r *http.Request, endpoint config.Endpoint, transformedBody []byte, transformerName string, authCtx *codexpool.AuthContext) (*http.Request, error) {
+	if endpoint.AuthType == codexpool.AuthTypeCodexPool && !useCodexPoolResponsesBackend(endpoint, transformerName) {
+		return nil, fmt.Errorf("codex pool currently only supports OpenAI2 (Responses API) transformer")
+	}
+
+	if useCodexPoolResponsesBackend(endpoint, transformerName) {
+		var err error
+		transformedBody, err = prepareCodexPoolRequestBody(transformedBody)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	targetPath := getTargetPath(r.URL.Path, endpoint, transformedBody, transformerName)
 	if targetPath == "" {
 		targetPath = r.URL.Path
 	}
 
-	normalizedAPIUrl := normalizeAPIUrl(endpoint.APIUrl)
-	targetURL := fmt.Sprintf("%s%s", normalizedAPIUrl, targetPath)
+	normalizedAPIURL := normalizeUpstreamBaseURL(endpoint, transformerName)
+	targetURL := fmt.Sprintf("%s%s", strings.TrimRight(normalizedAPIURL, "/"), targetPath)
 	if r.URL.RawQuery != "" {
 		targetURL += "?" + r.URL.RawQuery
 	}
@@ -182,7 +204,17 @@ func buildProxyRequest(r *http.Request, endpoint config.Endpoint, transformedBod
 	// Set authentication based on transformer type
 	switch transformerName {
 	case "cc_openai", "cc_openai2", "cx_chat_openai", "cx_chat_openai2", "cx_resp_openai", "cx_resp_openai2":
-		proxyReq.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
+		bearerToken := endpoint.APIKey
+		if authCtx != nil && strings.TrimSpace(authCtx.BearerToken) != "" {
+			bearerToken = authCtx.BearerToken
+		}
+		proxyReq.Header.Set("Authorization", "Bearer "+bearerToken)
+		if authCtx != nil && strings.TrimSpace(authCtx.AccountID) != "" {
+			proxyReq.Header.Set("ChatGPT-Account-Id", authCtx.AccountID)
+		}
+		if useCodexPoolResponsesBackend(endpoint, transformerName) {
+			proxyReq.Header.Set("Accept", "text/event-stream")
+		}
 	case "cc_gemini", "cx_chat_gemini", "cx_resp_gemini":
 		q := proxyReq.URL.Query()
 		q.Set("key", endpoint.APIKey)
@@ -194,11 +226,63 @@ func buildProxyRequest(r *http.Request, endpoint config.Endpoint, transformedBod
 		proxyReq.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
 	}
 
-	// Set Host header
-	hostOnly := strings.TrimPrefix(strings.TrimPrefix(normalizedAPIUrl, "https://"), "http://")
-	proxyReq.Header.Set("Host", hostOnly)
+	// net/http uses Request.Host for outbound Host header overrides.
+	proxyReq.Host = proxyReq.URL.Host
 
 	return proxyReq, nil
+}
+
+func useCodexPoolResponsesBackend(endpoint config.Endpoint, transformerName string) bool {
+	if endpoint.AuthType != codexpool.AuthTypeCodexPool {
+		return false
+	}
+
+	switch transformerName {
+	case "cc_openai2", "cx_chat_openai2", "cx_resp_openai2":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeUpstreamBaseURL(endpoint config.Endpoint, transformerName string) string {
+	if useCodexPoolResponsesBackend(endpoint, transformerName) {
+		return codexPoolBackendBaseURL
+	}
+
+	normalizedAPIURL := normalizeAPIUrl(endpoint.APIUrl)
+	if !strings.HasPrefix(normalizedAPIURL, "http://") && !strings.HasPrefix(normalizedAPIURL, "https://") {
+		normalizedAPIURL = "https://" + normalizedAPIURL
+	}
+	return normalizedAPIURL
+}
+
+func prepareCodexPoolRequestBody(transformedBody []byte) ([]byte, error) {
+	if len(transformedBody) == 0 {
+		return nil, fmt.Errorf("codex pool request body is empty")
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(transformedBody, &payload); err != nil {
+		return nil, fmt.Errorf("failed to parse codex pool request body: %w", err)
+	}
+
+	payload["store"] = false
+	payload["stream"] = true
+
+	if instructions, ok := payload["instructions"].(string); !ok || strings.TrimSpace(instructions) == "" {
+		payload["instructions"] = codexPoolDefaultInstruction
+	}
+
+	if _, ok := payload["input"]; !ok {
+		return nil, fmt.Errorf("codex pool request body is missing input")
+	}
+
+	normalizedBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode codex pool request body: %w", err)
+	}
+	return normalizedBody, nil
 }
 
 // sendRequest sends the HTTP request and returns the response

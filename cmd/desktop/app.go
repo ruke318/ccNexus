@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lich0821/ccNexus/internal/codexpool"
 	"github.com/lich0821/ccNexus/internal/config"
 	"github.com/lich0821/ccNexus/internal/logger"
 	"github.com/lich0821/ccNexus/internal/proxy"
@@ -47,14 +48,17 @@ type App struct {
 	trayIcon []byte
 
 	// Services
-	stats    *service.StatsService
-	endpoint *service.EndpointService
-	settings *service.SettingsService
-	webdav   *service.WebDAVService
-	backup   *service.BackupService
-	archive  *service.ArchiveService
-	update   *service.UpdateService
-	terminal *service.TerminalService
+	stats      *service.StatsService
+	endpoint   *service.EndpointService
+	settings   *service.SettingsService
+	webdav     *service.WebDAVService
+	backup     *service.BackupService
+	archive    *service.ArchiveService
+	update     *service.UpdateService
+	terminal   *service.TerminalService
+	codexPool  *service.CodexPoolService
+	aiConfig   *service.AIConfigService
+	skillFiles *service.SkillFilesService
 }
 
 // NewApp creates a new App application struct
@@ -121,7 +125,8 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	statsAdapter := storage.NewStatsStorageAdapter(sqliteStorage)
-	a.proxy = proxy.New(cfg, statsAdapter, deviceID)
+	poolManager := codexpool.NewManager(sqliteStorage)
+	a.proxy = proxy.New(cfg, statsAdapter, deviceID, poolManager)
 
 	a.proxy.SetOnEndpointSuccess(func(endpointName string) {
 		runtime.EventsEmit(ctx, "endpoint:success", endpointName)
@@ -130,13 +135,23 @@ func (a *App) startup(ctx context.Context) {
 	// Initialize services
 	version := a.GetVersion()
 	a.stats = service.NewStatsService(a.proxy, a.config)
-	a.endpoint = service.NewEndpointService(a.config, a.proxy, a.storage)
+	a.terminal = service.NewTerminalService(a.config, a.storage)
+	a.codexPool = service.NewCodexPoolService(poolManager, a.terminal)
+	a.endpoint = service.NewEndpointService(a.config, a.proxy, a.storage, poolManager)
 	a.settings = service.NewSettingsService(a.config, a.storage)
 	a.webdav = service.NewWebDAVService(a.config, a.storage, version)
 	a.backup = service.NewBackupService(a.config, a.storage, version, a.webdav)
 	a.archive = service.NewArchiveService(a.storage)
 	a.update = service.NewUpdateService(a.config, a.storage, version)
-	a.terminal = service.NewTerminalService(a.config, a.storage)
+	a.aiConfig = service.NewAIConfigService()
+
+	// Initialize SkillFilesService
+	skillFilesService, err := service.NewSkillFilesService()
+	if err != nil {
+		logger.Warn("Failed to initialize SkillFilesService: %v", err)
+	} else {
+		a.skillFiles = skillFilesService
+	}
 
 	a.initTray()
 
@@ -371,9 +386,18 @@ func (a *App) GetStatsTrendByPeriod(period string) string {
 func (a *App) AddEndpoint(name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType string) error {
 	return a.endpoint.AddEndpoint(name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType)
 }
+
+func (a *App) AddEndpointAdvanced(name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType, authType string, codexPoolID int64) error {
+	return a.endpoint.AddEndpointAdvanced(name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType, authType, codexPoolID)
+}
+
 func (a *App) RemoveEndpoint(id int64) error { return a.endpoint.RemoveEndpoint(id) }
 func (a *App) UpdateEndpoint(id int64, name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType string) error {
 	return a.endpoint.UpdateEndpoint(id, name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType)
+}
+
+func (a *App) UpdateEndpointAdvanced(id int64, name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType, authType string, codexPoolID int64) error {
+	return a.endpoint.UpdateEndpointAdvanced(id, name, apiUrl, apiKey, transformer, model, remark, proxyURL, clientType, authType, codexPoolID)
 }
 func (a *App) ToggleEndpoint(id int64, enabled bool) error {
 	return a.endpoint.ToggleEndpoint(id, enabled)
@@ -390,8 +414,8 @@ func (a *App) SwitchToEndpoint(endpointName, clientType string) error {
 func (a *App) TestEndpoint(id int64) string      { return a.endpoint.TestEndpoint(id) }
 func (a *App) TestEndpointLight(id int64) string { return a.endpoint.TestEndpointLight(id) }
 func (a *App) TestAllEndpointsZeroCost() string  { return a.endpoint.TestAllEndpointsZeroCost() }
-func (a *App) FetchModels(apiUrl, apiKey, transformer, proxyURL string) string {
-	return a.endpoint.FetchModels(apiUrl, apiKey, transformer, proxyURL)
+func (a *App) FetchModels(apiUrl, apiKey, transformer, proxyURL, authType string, codexPoolID int64) string {
+	return a.endpoint.FetchModels(apiUrl, apiKey, transformer, proxyURL, authType, codexPoolID)
 }
 
 // ========== Settings Bindings ==========
@@ -426,6 +450,82 @@ func (a *App) GetProxyURL() string               { return a.settings.GetProxyURL
 func (a *App) SetProxyURL(proxyURL string) error { return a.settings.SetProxyURL(proxyURL) }
 func (a *App) SaveSettings(settingsJSON string) error {
 	return a.settings.SaveSettings(settingsJSON)
+}
+
+// ========== AI Config Bindings ==========
+
+func (a *App) ReadAIConfig(product, fileKey string) string {
+	if a.aiConfig == nil {
+		a.aiConfig = service.NewAIConfigService()
+	}
+	res := a.aiConfig.ReadAIConfig(product, fileKey)
+	data, _ := json.Marshal(res)
+	return string(data)
+}
+
+func (a *App) WriteAIConfig(product, fileKey, content string, expectedModTime int64) string {
+	if a.aiConfig == nil {
+		a.aiConfig = service.NewAIConfigService()
+	}
+	res := a.aiConfig.WriteAIConfig(product, fileKey, content, expectedModTime)
+	data, _ := json.Marshal(res)
+	return string(data)
+}
+
+func (a *App) CreateAIConfig(product, fileKey, initialContent string) string {
+	if a.aiConfig == nil {
+		a.aiConfig = service.NewAIConfigService()
+	}
+	res := a.aiConfig.CreateAIConfig(product, fileKey, initialContent)
+	data, _ := json.Marshal(res)
+	return string(data)
+}
+
+// ========== Skill Files Bindings ==========
+
+func (a *App) ListSkillFiles() string {
+	if a.skillFiles == nil {
+		return `{"ok":false,"code":"Unknown","message":"SkillFilesService not initialized"}`
+	}
+	res := a.skillFiles.ListSkillFiles()
+	data, _ := json.Marshal(res)
+	return string(data)
+}
+
+func (a *App) ReadSkillFile(relPath string) string {
+	if a.skillFiles == nil {
+		return `{"ok":false,"code":"Unknown","message":"SkillFilesService not initialized"}`
+	}
+	res := a.skillFiles.ReadSkillFile(relPath)
+	data, _ := json.Marshal(res)
+	return string(data)
+}
+
+func (a *App) WriteSkillFile(relPath, content string, expectedModTime int64) string {
+	if a.skillFiles == nil {
+		return `{"ok":false,"code":"Unknown","message":"SkillFilesService not initialized"}`
+	}
+	res := a.skillFiles.WriteSkillFile(relPath, content, expectedModTime)
+	data, _ := json.Marshal(res)
+	return string(data)
+}
+
+func (a *App) ListSkillDirs() string {
+	if a.skillFiles == nil {
+		return `{"ok":false,"code":"Unknown","message":"SkillFilesService not initialized"}`
+	}
+	res := a.skillFiles.ListSkillDirs()
+	data, _ := json.Marshal(res)
+	return string(data)
+}
+
+func (a *App) ReadSkillDoc(dirName string) string {
+	if a.skillFiles == nil {
+		return `{"ok":false,"code":"Unknown","message":"SkillFilesService not initialized"}`
+	}
+	res := a.skillFiles.ReadSkillDoc(dirName)
+	data, _ := json.Marshal(res)
+	return string(data)
 }
 
 // ========== WebDAV Bindings ==========
@@ -556,3 +656,35 @@ func (a *App) DeleteCodexSession(sessionID string) error {
 func (a *App) RenameCodexSession(sessionID, alias string) error {
 	return a.terminal.RenameCodexSession(sessionID, alias)
 }
+
+func (a *App) ListCodexSlots() string { return a.codexPool.ListSlots() }
+
+func (a *App) CreateCodexSlot(name, accountID, remark string) string {
+	return a.codexPool.CreateSlot(name, accountID, remark)
+}
+
+func (a *App) UpdateCodexSlot(id int64, name, accountID, remark string, enabled bool) string {
+	return a.codexPool.UpdateSlot(id, name, accountID, remark, enabled)
+}
+
+func (a *App) DeleteCodexSlot(id int64) error { return a.codexPool.DeleteSlot(id) }
+
+func (a *App) SyncCodexSlotStatus(id int64) string { return a.codexPool.SyncSlotStatus(id) }
+
+func (a *App) LaunchCodexSlotLogin(id int64) error {
+	return a.codexPool.LaunchSlotLogin(id, func(url string) {
+		a.OpenURL(url)
+	})
+}
+
+func (a *App) ListCodexPools() string { return a.codexPool.ListPools() }
+
+func (a *App) CreateCodexPool(name string, slotIDs []int64) string {
+	return a.codexPool.CreatePool(name, slotIDs)
+}
+
+func (a *App) UpdateCodexPool(id int64, name, strategy string, enabled bool, cooldown429Sec, cooldown5xxSec int, authExpiredPolicy string, slotIDs []int64) string {
+	return a.codexPool.UpdatePool(id, name, strategy, enabled, cooldown429Sec, cooldown5xxSec, authExpiredPolicy, slotIDs)
+}
+
+func (a *App) DeleteCodexPool(id int64) error { return a.codexPool.DeletePool(id) }

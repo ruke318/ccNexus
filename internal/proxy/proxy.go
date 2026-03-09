@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lich0821/ccNexus/internal/codexpool"
 	"github.com/lich0821/ccNexus/internal/config"
 	"github.com/lich0821/ccNexus/internal/logger"
 )
@@ -37,6 +38,7 @@ type APIResponse struct {
 type Proxy struct {
 	config             *config.Config
 	stats              *Stats
+	codexPool          *codexpool.Manager
 	currentIndexByType map[string]int
 	mu                 sync.RWMutex
 	servers            map[int]*http.Server
@@ -50,12 +52,13 @@ type Proxy struct {
 }
 
 // New creates a new Proxy instance
-func New(cfg *config.Config, statsStorage StatsStorage, deviceID string) *Proxy {
+func New(cfg *config.Config, statsStorage StatsStorage, deviceID string, codexPool *codexpool.Manager) *Proxy {
 	stats := NewStats(statsStorage, deviceID)
 
 	return &Proxy{
-		config: cfg,
-		stats:  stats,
+		config:    cfg,
+		stats:     stats,
+		codexPool: codexPool,
 		currentIndexByType: map[string]int{
 			"claude": 0,
 			"codex":  0,
@@ -386,6 +389,25 @@ func detectClientType(r *http.Request, clientFormat ClientFormat, cfg *config.Co
 	}
 }
 
+func (p *Proxy) endpointAttemptLimit(endpoint config.Endpoint) int {
+	if endpoint.AuthType == codexpool.AuthTypeCodexPool && p.codexPool != nil && endpoint.CodexPoolID > 0 {
+		if count := p.codexPool.GetPoolSlotCount(endpoint.CodexPoolID); count > 0 {
+			return count
+		}
+	}
+	return 2
+}
+
+func (p *Proxy) endpointCooldowns(endpoint config.Endpoint) (time.Duration, time.Duration) {
+	if endpoint.AuthType == codexpool.AuthTypeCodexPool && p.codexPool != nil && endpoint.CodexPoolID > 0 {
+		pool, err := p.codexPool.GetPool(endpoint.CodexPoolID)
+		if err == nil && pool != nil {
+			return time.Duration(pool.Cooldown429Sec) * time.Second, time.Duration(pool.Cooldown5xxSec) * time.Second
+		}
+	}
+	return 10 * time.Minute, 2 * time.Minute
+}
+
 // handleProxy handles the main proxy logic
 func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)
@@ -418,7 +440,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	maxRetries := len(endpoints) * 2
+	maxRetries := 0
+	for _, endpoint := range endpoints {
+		maxRetries += p.endpointAttemptLimit(endpoint)
+	}
+	if maxRetries < len(endpoints)*2 {
+		maxRetries = len(endpoints) * 2
+	}
 	endpointAttempts := 0
 	lastEndpointName := ""
 
@@ -429,6 +457,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		attemptLimit := p.endpointAttemptLimit(endpoint)
+
 		// Reset attempts counter if endpoint changed (e.g., manual switch)
 		if lastEndpointName != "" && lastEndpointName != endpoint.Name {
 			endpointAttempts = 0
@@ -436,6 +466,20 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		lastEndpointName = endpoint.Name
 
 		endpointAttempts++
+		var authCtx *codexpool.AuthContext
+		if endpoint.AuthType == codexpool.AuthTypeCodexPool && p.codexPool != nil {
+			authCtx, err = p.codexPool.ResolveAuthForPool(endpoint.CodexPoolID)
+			if err != nil {
+				logger.Error("[%s] Failed to resolve codex pool auth: %v", endpoint.Name, err)
+				p.stats.RecordError(endpoint.Name)
+				if endpointAttempts >= attemptLimit {
+					p.rotateEndpoint(clientType)
+					endpointAttempts = 0
+				}
+				continue
+			}
+		}
+
 		p.markRequestActive(endpoint.Name)
 		p.stats.RecordRequest(endpoint.Name)
 
@@ -444,7 +488,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			logger.Error("[%s] %v", endpoint.Name, err)
 			p.stats.RecordError(endpoint.Name)
 			p.markRequestInactive(endpoint.Name)
-			if endpointAttempts >= 2 {
+			if endpointAttempts >= attemptLimit {
 				p.rotateEndpoint(clientType)
 				endpointAttempts = 0
 			}
@@ -458,7 +502,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			logger.Error("[%s] Failed to transform request: %v", endpoint.Name, err)
 			p.stats.RecordError(endpoint.Name)
 			p.markRequestInactive(endpoint.Name)
-			if endpointAttempts >= 2 {
+			if endpointAttempts >= attemptLimit {
 				p.rotateEndpoint(clientType)
 				endpointAttempts = 0
 			}
@@ -485,12 +529,12 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		proxyReq, err := buildProxyRequest(r, endpoint, transformedBody, transformerName)
+		proxyReq, err := buildProxyRequest(r, endpoint, transformedBody, transformerName, authCtx)
 		if err != nil {
 			logger.Error("[%s] Failed to create request: %v", endpoint.Name, err)
 			p.stats.RecordError(endpoint.Name)
 			p.markRequestInactive(endpoint.Name)
-			if endpointAttempts >= 2 {
+			if endpointAttempts >= attemptLimit {
 				p.rotateEndpoint(clientType)
 				endpointAttempts = 0
 			}
@@ -503,7 +547,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			logger.Error("[%s] Request failed: %v", endpoint.Name, err)
 			p.stats.RecordError(endpoint.Name)
 			p.markRequestInactive(endpoint.Name)
-			if endpointAttempts >= 2 {
+			if authCtx != nil && p.codexPool != nil {
+				_, cooldown5xx := p.endpointCooldowns(endpoint)
+				p.codexPool.MarkServerError(authCtx.SlotID, cooldown5xx, err.Error())
+			}
+			if endpointAttempts >= attemptLimit {
 				p.rotateEndpoint(clientType)
 				endpointAttempts = 0
 			}
@@ -523,6 +571,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 			p.stats.RecordTokens(endpoint.Name, inputTokens, outputTokens)
 			p.markRequestInactive(endpoint.Name)
+			if authCtx != nil && p.codexPool != nil {
+				p.codexPool.MarkSuccess(authCtx.SlotID)
+			}
 			if p.onEndpointSuccess != nil {
 				p.onEndpointSuccess(endpoint.Name)
 			}
@@ -535,6 +586,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				p.stats.RecordTokens(endpoint.Name, inputTokens, outputTokens)
 				p.markRequestInactive(endpoint.Name)
+				if authCtx != nil && p.codexPool != nil {
+					p.codexPool.MarkSuccess(authCtx.SlotID)
+				}
 				if p.onEndpointSuccess != nil {
 					p.onEndpointSuccess(endpoint.Name)
 				}
@@ -559,7 +613,18 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			logger.DebugLog("[%s] Request failed %d: %s", endpoint.Name, resp.StatusCode, errMsg)
 			p.stats.RecordError(endpoint.Name)
 			p.markRequestInactive(endpoint.Name)
-			if endpointAttempts >= 2 {
+			if authCtx != nil && p.codexPool != nil {
+				cooldown429, cooldown5xx := p.endpointCooldowns(endpoint)
+				switch resp.StatusCode {
+				case http.StatusUnauthorized, http.StatusForbidden:
+					p.codexPool.MarkAuthExpired(authCtx.SlotID, errMsg)
+				case http.StatusTooManyRequests:
+					p.codexPool.MarkRateLimited(authCtx.SlotID, cooldown429, errMsg)
+				default:
+					p.codexPool.MarkServerError(authCtx.SlotID, cooldown5xx, errMsg)
+				}
+			}
+			if endpointAttempts >= attemptLimit {
 				p.rotateEndpoint(clientType)
 				endpointAttempts = 0
 			}
@@ -574,6 +639,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Body.Close()
 		p.markRequestInactive(endpoint.Name)
+		if authCtx != nil && p.codexPool != nil {
+			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+				p.codexPool.MarkAuthExpired(authCtx.SlotID, string(respBody))
+			}
+		}
 		// Log non-200 responses for debugging
 		if resp.StatusCode != http.StatusOK {
 			errMsg := string(respBody)

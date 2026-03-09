@@ -31,6 +31,12 @@ func LaunchCodexTerminalWithSession(terminalID, dir, sessionID string) error {
 	return launchTerminalWithCli(terminalID, dir, cliCmd)
 }
 
+// LaunchCodexLoginTerminal launches a terminal that logs into Codex using an isolated CODEX_HOME.
+func LaunchCodexLoginTerminal(terminalID, dir, codexHome string) error {
+	cliCmd := getCodexLoginCommand(codexHome)
+	return launchTerminalWithCli(terminalID, dir, cliCmd)
+}
+
 // launchTerminalWithCli is the common implementation for launching terminals
 func launchTerminalWithCli(terminalID, dir, cliCmd string) error {
 	// Validate directory exists
@@ -107,6 +113,17 @@ func getCodexCommand(sessionID string) string {
 	if sessionID != "" {
 		cmd = fmt.Sprintf("codex resume %s", shellEscape(sessionID))
 	}
+	if runtime.GOOS == "darwin" {
+		return "npm --version >/dev/null 2>&1; " + cmd
+	}
+	return cmd
+}
+
+func getCodexLoginCommand(codexHome string) string {
+	if runtime.GOOS == "windows" {
+		return fmt.Sprintf("set CODEX_HOME=%s && codex login", codexHome)
+	}
+	cmd := fmt.Sprintf("env CODEX_HOME=%s codex login", shellEscape(codexHome))
 	if runtime.GOOS == "darwin" {
 		return "npm --version >/dev/null 2>&1; " + cmd
 	}

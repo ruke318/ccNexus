@@ -6,6 +6,10 @@ export function AddEndpoint(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
   return window['go']['main']['App']['AddEndpoint'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
 }
 
+export function AddEndpointAdvanced(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10) {
+  return window['go']['main']['App']['AddEndpointAdvanced'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
+}
+
 export function AddProjectDir(arg1) {
   return window['go']['main']['App']['AddProjectDir'](arg1);
 }
@@ -34,6 +38,18 @@ export function ClearLogs() {
   return window['go']['main']['App']['ClearLogs']();
 }
 
+export function CreateAIConfig(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CreateAIConfig'](arg1, arg2, arg3);
+}
+
+export function CreateCodexPool(arg1, arg2) {
+  return window['go']['main']['App']['CreateCodexPool'](arg1, arg2);
+}
+
+export function CreateCodexSlot(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CreateCodexSlot'](arg1, arg2, arg3);
+}
+
 export function DeleteArchive(arg1) {
   return window['go']['main']['App']['DeleteArchive'](arg1);
 }
@@ -42,8 +58,16 @@ export function DeleteBackups(arg1, arg2) {
   return window['go']['main']['App']['DeleteBackups'](arg1, arg2);
 }
 
+export function DeleteCodexPool(arg1) {
+  return window['go']['main']['App']['DeleteCodexPool'](arg1);
+}
+
 export function DeleteCodexSession(arg1) {
   return window['go']['main']['App']['DeleteCodexSession'](arg1);
+}
+
+export function DeleteCodexSlot(arg1) {
+  return window['go']['main']['App']['DeleteCodexSlot'](arg1);
 }
 
 export function DeleteSession(arg1, arg2) {
@@ -78,8 +102,8 @@ export function FetchImageAsBase64(arg1) {
   return window['go']['main']['App']['FetchImageAsBase64'](arg1);
 }
 
-export function FetchModels(arg1, arg2, arg3) {
-  return window['go']['main']['App']['FetchModels'](arg1, arg2, arg3);
+export function FetchModels(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['FetchModels'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function GenerateMockArchives(arg1) {
@@ -218,6 +242,10 @@ export function LaunchCodexSessionTerminal(arg1, arg2) {
   return window['go']['main']['App']['LaunchCodexSessionTerminal'](arg1, arg2);
 }
 
+export function LaunchCodexSlotLogin(arg1) {
+  return window['go']['main']['App']['LaunchCodexSlotLogin'](arg1);
+}
+
 export function LaunchCodexTerminal(arg1) {
   return window['go']['main']['App']['LaunchCodexTerminal'](arg1);
 }
@@ -238,6 +266,22 @@ export function ListBackups(arg1) {
   return window['go']['main']['App']['ListBackups'](arg1);
 }
 
+export function ListCodexPools() {
+  return window['go']['main']['App']['ListCodexPools']();
+}
+
+export function ListCodexSlots() {
+  return window['go']['main']['App']['ListCodexSlots']();
+}
+
+export function ListSkillDirs() {
+  return window['go']['main']['App']['ListSkillDirs']();
+}
+
+export function ListSkillFiles() {
+  return window['go']['main']['App']['ListSkillFiles']();
+}
+
 export function ListWebDAVBackups() {
   return window['go']['main']['App']['ListWebDAVBackups']();
 }
@@ -248,6 +292,18 @@ export function OpenURL(arg1) {
 
 export function Quit() {
   return window['go']['main']['App']['Quit']();
+}
+
+export function ReadAIConfig(arg1, arg2) {
+  return window['go']['main']['App']['ReadAIConfig'](arg1, arg2);
+}
+
+export function ReadSkillDoc(arg1) {
+  return window['go']['main']['App']['ReadSkillDoc'](arg1);
+}
+
+export function ReadSkillFile(arg1) {
+  return window['go']['main']['App']['ReadSkillFile'](arg1);
 }
 
 export function RemoveEndpoint(arg1) {
@@ -342,6 +398,10 @@ export function SwitchToEndpoint(arg1, arg2) {
   return window['go']['main']['App']['SwitchToEndpoint'](arg1, arg2);
 }
 
+export function SyncCodexSlotStatus(arg1) {
+  return window['go']['main']['App']['SyncCodexSlotStatus'](arg1);
+}
+
 export function TestAllEndpointsZeroCost() {
   return window['go']['main']['App']['TestAllEndpointsZeroCost']();
 }
@@ -370,12 +430,24 @@ export function UpdateBackupProvider(arg1) {
   return window['go']['main']['App']['UpdateBackupProvider'](arg1);
 }
 
+export function UpdateCodexPool(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
+  return window['go']['main']['App']['UpdateCodexPool'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+}
+
+export function UpdateCodexSlot(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['UpdateCodexSlot'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function UpdateConfig(arg1) {
   return window['go']['main']['App']['UpdateConfig'](arg1);
 }
 
 export function UpdateEndpoint(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) {
   return window['go']['main']['App']['UpdateEndpoint'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
+}
+
+export function UpdateEndpointAdvanced(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11) {
+  return window['go']['main']['App']['UpdateEndpointAdvanced'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11);
 }
 
 export function UpdateLocalBackupDir(arg1) {
@@ -392,4 +464,12 @@ export function UpdateS3BackupConfig(arg1, arg2, arg3, arg4, arg5, arg6, arg7, a
 
 export function UpdateWebDAVConfig(arg1, arg2, arg3) {
   return window['go']['main']['App']['UpdateWebDAVConfig'](arg1, arg2, arg3);
+}
+
+export function WriteAIConfig(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['WriteAIConfig'](arg1, arg2, arg3, arg4);
+}
+
+export function WriteSkillFile(arg1, arg2, arg3) {
+  return window['go']['main']['App']['WriteSkillFile'](arg1, arg2, arg3);
 }

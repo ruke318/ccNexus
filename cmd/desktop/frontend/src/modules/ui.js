@@ -6,14 +6,58 @@ export function initUI() {
 
     const app = document.getElementById('app');
     app.innerHTML = `
-        <!-- 页面右上角斜拉横幅 -->
-        <div class="ribbon-banner hidden" onclick="window.showSponsorModal()" title="${t('sponsor.ribbonTip')}">${t('sponsor.ribbon')}</div>
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">🚀 ccNexus</div>
+            <nav class="nav-menu">
+                <div class="nav-item active" data-view="dashboard">
+                    <span class="icon">📊</span>
+                    <span>${t('menu.dashboard')}</span>
+                </div>
+                <div class="nav-item" data-view="assistant">
+                    <span class="icon">🎛️</span>
+                    <span>${t('menu.assistant')}</span>
+                </div>
+                <!-- AI 助手子菜单 -->
+                <div class="nav-submenu" id="assistant-submenu" style="display: none;">
+                    <div class="nav-subitem active" data-product="claude">
+                        <span>Claude Code</span>
+                    </div>
+                    <div class="nav-subitem" data-product="codex">
+                        <span>Codex</span>
+                    </div>
+                    <div class="nav-subitem" data-product="gemini">
+                        <span>Gemini</span>
+                    </div>
+                </div>
+                <div class="nav-item" data-view="skills">
+                    <span class="icon">📜</span>
+                    <span>${t('menu.skills')}</span>
+                </div>
+                <!-- Skills 子菜单 -->
+                <div class="nav-submenu" id="skills-submenu" style="display: none;">
+                    <!-- 动态渲染文件列表 -->
+                </div>
+            </nav>
+            <div class="sidebar-footer">v<span id="appVersion">1.0.0</span></div>
+        </aside>
 
-        <div class="header">
-            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                <div>
-                    <h1>🚀 ${t('app.title')}<span id="broadcast-banner" class="broadcast-banner hidden"></span></h1>
-                    <p>${t('header.title')}<span id="festivalToggle" class="festival-toggle hidden" onclick="window.toggleFestivalEffect(); event.stopPropagation();" title="${t('festival.toggle') || '切换氛围效果'}"><span class="festival-toggle-name" id="festivalToggleName"></span><span class="festival-toggle-switch" id="festivalToggleSwitch"></span></span></p>
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- 页面右上角斜拉横幅 -->
+            <div class="ribbon-banner hidden" onclick="window.showSponsorModal()" title="${t('sponsor.ribbonTip')}">${t('sponsor.ribbon')}</div>
+
+        <div id="view-container">
+            <!-- 仪表盘视图 -->
+            <div id="dashboard-view" class="container">
+                <!-- Header - 只在代理视图显示 -->
+                <div class="header" style="margin: -30px -30px 20px -30px; padding: 12px 30px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 46px;">
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span id="broadcast-banner" class="broadcast-banner hidden" style="margin-left: 0;"></span>
+                    </div>
+                    <p style="margin: 0;">${t('header.title')}<span id="festivalToggle" class="festival-toggle hidden" onclick="window.toggleFestivalEffect(); event.stopPropagation();" title="${t('festival.toggle') || '切换氛围效果'}"><span class="festival-toggle-name" id="festivalToggleName"></span><span class="festival-toggle-switch" id="festivalToggleSwitch"></span></span></p>
                 </div>
                 <div style="display: flex; gap: 15px; align-items: center;">
                     <div class="port-display" onclick="window.showEditPortModal()" title="${t('header.port')}">
@@ -39,10 +83,9 @@ export function initUI() {
                     </div>
                 </div>
             </div>
-        </div>
+                </div>
 
-        <div class="container">
-            <!-- Statistics -->
+                <!-- Statistics -->
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                     <h2 style="margin: 0;">📊 ${t('statistics.title')}</h2>
@@ -269,6 +312,42 @@ export function initUI() {
                 </div>
             </div>
 
+            <div class="card">
+                <div class="codex-section-header">
+                    <div>
+                        <h2 style="margin: 0;">🧩 ${t('codexPool.title')}</h2>
+                        <p class="codex-section-subtitle">${t('codexPool.subtitle')}</p>
+                    </div>
+                    <button class="btn btn-secondary btn-sm" onclick="window.loadCodexPoolData()">${t('codexPool.refresh')}</button>
+                </div>
+                <div class="codex-manager-grid">
+                    <section class="codex-manager-panel">
+                        <div class="codex-manager-panel-header">
+                            <div>
+                                <h3>${t('codexPool.slots')}</h3>
+                                <p>${t('codexPool.slotsHelp')}</p>
+                            </div>
+                            <button class="btn btn-primary btn-sm" onclick="window.showAddCodexSlotModal()">${t('codexPool.addSlot')}</button>
+                        </div>
+                        <div id="codexSlotList" class="codex-resource-list">
+                            <div class="loading">${t('codexPool.loadingSlots')}</div>
+                        </div>
+                    </section>
+                    <section class="codex-manager-panel">
+                        <div class="codex-manager-panel-header">
+                            <div>
+                                <h3>${t('codexPool.pools')}</h3>
+                                <p>${t('codexPool.poolsHelp')}</p>
+                            </div>
+                            <button class="btn btn-primary btn-sm" onclick="window.showAddCodexPoolModal()">${t('codexPool.addPool')}</button>
+                        </div>
+                        <div id="codexPoolList" class="codex-resource-list">
+                            <div class="loading">${t('codexPool.loadingPools')}</div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
             <!-- Logs Panel -->
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -298,6 +377,13 @@ export function initUI() {
                 </div>
             </div>
         </div>
+
+            <!-- 助手设置视图 -->
+            <div id="assistant-view" class="container" style="display: none;"></div>
+
+            <!-- Skills 视图 -->
+            <div id="skills-view" class="container" style="display: none;"></div>
+        </div> <!-- view-container -->
 
         <!-- Footer -->
         <div class="footer">
@@ -329,11 +415,33 @@ export function initUI() {
                         <label><span class="required">*</span>${t('modal.name')}</label>
                         <input type="text" id="endpointName" placeholder="${t('modal.namePlaceholder')}">
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" id="endpointUrlGroup">
                         <label><span class="required">*</span>${t('modal.apiUrl')}</label>
                         <input type="text" id="endpointUrl" placeholder="${t('modal.apiUrlPlaceholder')}">
+                        <p style="color: #666; font-size: 12px; margin-top: 5px;" id="endpointUrlHelp">
+                            ${t('modal.apiUrlHelp')}
+                        </p>
                     </div>
                     <div class="form-group">
+                        <label><span class="required">*</span>${t('modal.authType')}</label>
+                        <select id="endpointAuthType" onchange="window.handleEndpointAuthTypeChange()">
+                            <option value="apikey">${t('modal.authTypeApiKey')}</option>
+                            <option value="codex_pool">${t('modal.authTypeCodexPool')}</option>
+                        </select>
+                        <p style="color: #666; font-size: 12px; margin-top: 5px;">
+                            ${t('modal.authTypeHelp')}
+                        </p>
+                    </div>
+                    <div class="form-group" id="endpointCodexPoolGroup" style="display: none;">
+                        <label><span class="required">*</span>${t('modal.codexPool')}</label>
+                        <select id="endpointCodexPoolId">
+                            <option value="">${t('modal.selectCodexPool')}</option>
+                        </select>
+                        <p style="color: #666; font-size: 12px; margin-top: 5px;">
+                            ${t('modal.codexPoolHelp')}
+                        </p>
+                    </div>
+                    <div class="form-group" id="endpointApiKeyGroup">
                         <label><span class="required">*</span>${t('modal.apiKey')}</label>
                         <div class="password-input-wrapper">
                             <input type="password" id="endpointKey" placeholder="${t('modal.apiKeyPlaceholder')}">
@@ -392,6 +500,94 @@ export function initUI() {
                 <div class="modal-footer">
                     <button class="btn btn-secondary" onclick="window.closeModal()">${t('modal.cancel')}</button>
                     <button class="btn btn-primary" onclick="window.saveEndpoint()">${t('modal.save')}</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="codexSlotModal" class="modal">
+            <div class="modal-content codex-modal-content">
+                <div class="modal-header">
+                    <h2 id="codexSlotModalTitle">${t('codexPool.addSlot')}</h2>
+                    <button class="modal-close" onclick="window.closeCodexSlotModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label><span class="required">*</span>${t('codexPool.slotName')}</label>
+                        <input type="text" id="codexSlotName" placeholder="${t('codexPool.slotNamePlaceholder')}">
+                    </div>
+                    <div class="form-group">
+                        <label>${t('codexPool.accountId')}</label>
+                        <input type="text" id="codexSlotAccountId" placeholder="${t('codexPool.accountIdPlaceholder')}">
+                        <p style="color: #666; font-size: 12px; margin-top: 5px;">${t('codexPool.accountIdHelp')}</p>
+                    </div>
+                    <div class="form-group">
+                        <label>${t('modal.remark')}</label>
+                        <input type="text" id="codexSlotRemark" placeholder="${t('codexPool.slotRemarkPlaceholder')}">
+                    </div>
+                    <label class="codex-checkbox-item codex-checkbox-item-inline">
+                        <input type="checkbox" id="codexSlotEnabled" checked>
+                        <span class="codex-checkbox-main">
+                            <span class="codex-checkbox-title">${t('codexPool.enabled')}</span>
+                            <span class="codex-checkbox-meta">${t('codexPool.slotEnabledHelp')}</span>
+                        </span>
+                    </label>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="window.closeCodexSlotModal()">${t('modal.cancel')}</button>
+                    <button class="btn btn-primary" onclick="window.saveCodexSlot()">${t('modal.save')}</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="codexPoolModal" class="modal">
+            <div class="modal-content codex-modal-content codex-modal-wide">
+                <div class="modal-header">
+                    <h2 id="codexPoolModalTitle">${t('codexPool.addPool')}</h2>
+                    <button class="modal-close" onclick="window.closeCodexPoolModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label><span class="required">*</span>${t('codexPool.poolName')}</label>
+                        <input type="text" id="codexPoolName" placeholder="${t('codexPool.poolNamePlaceholder')}">
+                    </div>
+                    <div class="codex-form-grid">
+                        <div class="form-group">
+                            <label>${t('codexPool.strategy')}</label>
+                            <select id="codexPoolStrategy">
+                                <option value="rr">${t('codexPool.strategyRoundRobin')}</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>${t('codexPool.authExpiredPolicy')}</label>
+                            <select id="codexPoolAuthExpiredPolicy">
+                                <option value="skip">${t('codexPool.authExpiredSkip')}</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>${t('codexPool.cooldown429Sec')}</label>
+                            <input type="number" id="codexPoolCooldown429" min="1" placeholder="600">
+                        </div>
+                        <div class="form-group">
+                            <label>${t('codexPool.cooldown5xxSec')}</label>
+                            <input type="number" id="codexPoolCooldown5xx" min="1" placeholder="120">
+                        </div>
+                    </div>
+                    <label class="codex-checkbox-item codex-checkbox-item-inline">
+                        <input type="checkbox" id="codexPoolEnabled" checked>
+                        <span class="codex-checkbox-main">
+                            <span class="codex-checkbox-title">${t('codexPool.enabled')}</span>
+                            <span class="codex-checkbox-meta">${t('codexPool.poolEnabledHelp')}</span>
+                        </span>
+                    </label>
+                    <div class="form-group">
+                        <label><span class="required">*</span>${t('codexPool.bindSlots')}</label>
+                        <div id="codexPoolSlotList" class="codex-checkbox-list"></div>
+                        <p style="color: #666; font-size: 12px; margin-top: 5px;">${t('codexPool.bindSlotsHelp')}</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="window.closeCodexPoolModal()">${t('modal.cancel')}</button>
+                    <button class="btn btn-primary" onclick="window.saveCodexPool()">${t('modal.save')}</button>
                 </div>
             </div>
         </div>
@@ -769,6 +965,7 @@ export function initUI() {
                 </div>
             </div>
         </div>
+        </main> <!-- main-content -->
     `;
 
     setupModalEventListeners();
@@ -776,9 +973,21 @@ export function initUI() {
 
 function setupModalEventListeners() {
     // Close modals on background click (endpointModal, portModal, welcomeModal do NOT close on background click)
-     document.getElementById('testResultModal').addEventListener('click', (e) => {
+    document.getElementById('testResultModal').addEventListener('click', (e) => {
         if (e.target.id === 'testResultModal') {
             window.closeTestResultModal();
+        }
+    });
+
+    document.getElementById('codexSlotModal').addEventListener('click', (e) => {
+        if (e.target.id === 'codexSlotModal') {
+            window.closeCodexSlotModal();
+        }
+    });
+
+    document.getElementById('codexPoolModal').addEventListener('click', (e) => {
+        if (e.target.id === 'codexPoolModal') {
+            window.closeCodexPoolModal();
         }
     });
 }

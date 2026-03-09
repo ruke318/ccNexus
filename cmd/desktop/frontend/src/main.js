@@ -15,6 +15,22 @@ import { showSettingsModal, closeSettingsModal, saveSettings, applyTheme, initTh
 import { checkUpdatesOnStartup, checkForUpdates, initUpdateSettings } from './modules/updater.js'
 import { initBroadcast } from './modules/broadcast.js'
 import { initSponsor, showSponsorModal, closeSponsorModal, openSponsorLink } from './modules/sponsor.js'
+import { initAssistantView } from './modules/assistant.js'
+import {
+    loadCodexPoolData,
+    showAddCodexSlotModal,
+    showEditCodexSlotModal,
+    closeCodexSlotModal,
+    saveCodexSlot,
+    syncCodexSlotStatus,
+    launchCodexSlotLogin,
+    deleteCodexSlot,
+    showAddCodexPoolModal,
+    showEditCodexPoolModal,
+    closeCodexPoolModal,
+    saveCodexPool,
+    deleteCodexPool
+} from './modules/codex-pool.js'
 import {
     showAddEndpointModal,
     editEndpoint,
@@ -39,11 +55,14 @@ import {
     openGitHub,
     openArticle,
     togglePasswordVisibility,
+    showNotification,
+    showConfirm,
     acceptConfirm,
     cancelConfirm,
     showCloseActionDialog,
     quitApplication,
-    minimizeToTray
+    minimizeToTray,
+    handleEndpointAuthTypeChange
 } from './modules/modal.js'
 
 // Load data on startup
@@ -127,6 +146,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     }, 3000);
 
+    setInterval(() => {
+        loadCodexPoolData({ silent: true });
+    }, 12000);
+
     // Refresh logs every 2 seconds
     setInterval(loadLogs, 2000);
 
@@ -164,7 +187,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 
 // Helper function to load config and render endpoints
 async function loadConfigAndRender() {
-    const config = await loadConfig();
+    const [config] = await Promise.all([
+        loadConfig(),
+        loadCodexPoolData({ silent: true })
+    ]);
     if (config) {
         const claudeEndpoints = config.endpoints.filter(ep => (ep.clientType || 'claude') === 'claude');
         const codexEndpoints = config.endpoints.filter(ep => (ep.clientType || 'claude') === 'codex');
@@ -200,12 +226,15 @@ window.copyLogs = copyLogs;
 window.clearLogs = clearLogs;
 window.changeLanguage = changeLanguage;
 window.togglePasswordVisibility = togglePasswordVisibility;
+window.showNotification = showNotification;
+window.showConfirm = showConfirm;
 window.acceptConfirm = acceptConfirm;
 window.checkForUpdates = checkForUpdates;
 window.cancelConfirm = cancelConfirm;
 window.showCloseActionDialog = showCloseActionDialog;
 window.quitApplication = quitApplication;
 window.minimizeToTray = minimizeToTray;
+window.handleEndpointAuthTypeChange = handleEndpointAuthTypeChange;
 window.showDataSyncDialog = showDataSyncDialog;
 window.switchStatsPeriod = switchStatsPeriod;
 window.toggleEndpointPanel = toggleEndpointPanel;
@@ -220,6 +249,19 @@ window.saveAutoThemeConfig = saveAutoThemeConfig;
 window.showSponsorModal = showSponsorModal;
 window.closeSponsorModal = closeSponsorModal;
 window.openSponsorLink = openSponsorLink;
+window.loadCodexPoolData = loadCodexPoolData;
+window.showAddCodexSlotModal = showAddCodexSlotModal;
+window.showEditCodexSlotModal = showEditCodexSlotModal;
+window.closeCodexSlotModal = closeCodexSlotModal;
+window.saveCodexSlot = saveCodexSlot;
+window.syncCodexSlotStatus = syncCodexSlotStatus;
+window.launchCodexSlotLogin = launchCodexSlotLogin;
+window.deleteCodexSlot = deleteCodexSlot;
+window.showAddCodexPoolModal = showAddCodexPoolModal;
+window.showEditCodexPoolModal = showEditCodexPoolModal;
+window.closeCodexPoolModal = closeCodexPoolModal;
+window.saveCodexPool = saveCodexPool;
+window.deleteCodexPool = deleteCodexPool;
 
 // History modal functions
 window.closeHistoryModal = async () => {
@@ -231,3 +273,76 @@ window.deleteHistoryArchive = async () => {
     const { deleteHistoryArchive } = await import('./modules/history.js');
     deleteHistoryArchive();
 };
+
+// ========== View Switching ==========
+let isAssistantViewInitialized = false;
+let isSkillsViewInitialized = false;
+
+window.switchView = function(viewName) {
+    // 更新 Sidebar active 状态
+    document.querySelectorAll('.nav-item').forEach(item => {
+        const isActive = item.dataset.view === viewName;
+        item.classList.toggle('active', isActive);
+    });
+
+    // 显示/隐藏子菜单
+    const assistantSubmenu = document.getElementById('assistant-submenu');
+    if (assistantSubmenu) {
+        assistantSubmenu.style.display = viewName === 'assistant' ? 'block' : 'none';
+    }
+
+    const skillsSubmenu = document.getElementById('skills-submenu');
+    if (skillsSubmenu) {
+        skillsSubmenu.style.display = viewName === 'skills' ? 'block' : 'none';
+    }
+
+    // 切换视图显示
+    const dashboardView = document.getElementById('dashboard-view');
+    const assistantView = document.getElementById('assistant-view');
+    const skillsView = document.getElementById('skills-view');
+
+    if (dashboardView) {
+        dashboardView.style.display = viewName === 'dashboard' ? 'block' : 'none';
+    }
+
+    if (assistantView) {
+        assistantView.style.display = viewName === 'assistant' ? 'block' : 'none';
+
+        // 首次切换到助手设置时初始化
+        if (viewName === 'assistant' && !isAssistantViewInitialized) {
+            initAssistantView();
+            isAssistantViewInitialized = true;
+        }
+    }
+
+    if (skillsView) {
+        skillsView.style.display = viewName === 'skills' ? 'block' : 'none';
+
+        // 首次切换到 Skills 时初始化
+        if (viewName === 'skills' && !isSkillsViewInitialized) {
+            import('./modules/skills.js').then(module => {
+                module.initSkillsView();
+                isSkillsViewInitialized = true;
+            });
+        } else if (viewName === 'skills') {
+            // 每次进入时刷新子菜单以保持同步
+            import('./modules/skills.js').then(module => {
+                module.renderSkillsSubmenu();
+            });
+        }
+    }
+};
+
+// 初始化 Sidebar 事件监听器
+window.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const viewName = item.dataset.view;
+                if (viewName) {
+                    window.switchView(viewName);
+                }
+            });
+        });
+    }, 500); // 等待 UI 初始化完成
+});

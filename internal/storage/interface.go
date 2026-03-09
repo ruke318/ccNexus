@@ -7,6 +7,8 @@ type Endpoint struct {
 	Name        string    `json:"name"`
 	APIUrl      string    `json:"apiUrl"`
 	APIKey      string    `json:"apiKey"`
+	AuthType    string    `json:"authType"`
+	CodexPoolID int64     `json:"codexPoolId"`
 	Enabled     bool      `json:"enabled"`
 	Transformer string    `json:"transformer"`
 	Model       string    `json:"model"`
@@ -35,6 +37,35 @@ type EndpointStats struct {
 	Errors       int
 	InputTokens  int64
 	OutputTokens int64
+}
+
+type CodexSlot struct {
+	ID            int64     `json:"id"`
+	Name          string    `json:"name"`
+	StateDir      string    `json:"stateDir"`
+	AccountID     string    `json:"accountId"`
+	Status        string    `json:"status"`
+	Enabled       bool      `json:"enabled"`
+	CooldownUntil time.Time `json:"cooldownUntil"`
+	LastCheckedAt time.Time `json:"lastCheckedAt"`
+	LastUsedAt    time.Time `json:"lastUsedAt"`
+	LastError     string    `json:"lastError"`
+	Remark        string    `json:"remark"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+type CodexPool struct {
+	ID                int64     `json:"id"`
+	Name              string    `json:"name"`
+	Strategy          string    `json:"strategy"`
+	Enabled           bool      `json:"enabled"`
+	Cooldown429Sec    int       `json:"cooldown429Sec"`
+	Cooldown5xxSec    int       `json:"cooldown5xxSec"`
+	AuthExpiredPolicy string    `json:"authExpiredPolicy"`
+	SlotIDs           []int64   `json:"slotIds"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
 }
 
 type Storage interface {

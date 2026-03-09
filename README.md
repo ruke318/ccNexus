@@ -17,6 +17,7 @@
 
 - **多端点轮换**：自动故障转移，一个失败自动切换下一个
 - **API 格式转换**：支持 Claude、OpenAI、Gemini 格式互转
+- **Codex Pool 号池**：支持浏览器授权多个 ChatGPT/Codex slot，按 Pool 自动轮换
 - **实时统计**：请求数、错误数、Token 用量监控
 - **WebDAV 同步**：多设备间同步配置和数据
 - **跨平台**：Windows、macOS、Linux
@@ -42,6 +43,25 @@
 ### 2. 添加端点
 
 点击「添加端点」，填写 API 地址、密钥、选择转换器（claude/openai/gemini）。
+
+如果你是给 `Codex CLI`/`Codex` 走号池，直接用桌面端的 `Codex Pool`：
+
+1. 先在 `Codex Pool` 里添加 slot，点浏览器授权登录
+2. 再创建 Pool，把多个 slot 绑进去
+3. 添加端点时把认证方式切到 `Codex Pool`
+4. 这时 **不用手填 API URL**
+5. 端点会自动走 `ChatGPT Codex backend`
+6. `Transformer` 会自动锁成 `openai2`
+7. 点「检测」可以直接拉这个 Pool 当前可用的模型列表
+
+普通 API Key 端点还是老逻辑：自己填 URL、Key、Transformer、Model。
+
+### 2.1 Codex Pool 说明
+
+- `Codex Pool` 模式适合一个人挂多个组织 / 多个 workspace 做号池轮换
+- 当前模型探测走的是 ChatGPT Codex 的 models 接口，不是 public OpenAI `/v1/models`
+- 如果某个 slot 周限额了，Pool 会自动切下一个可用 slot
+- Pool 模式下端点保存时会自动固定到 Codex backend，不需要自己维护 URL
 
 ### 3. 配置 CC
 
